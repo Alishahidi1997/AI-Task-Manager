@@ -1,16 +1,10 @@
-# daily blurb from completed tasks — real openai if key set, else fake text
+# daily summary using OpenAI only (no mock fallback)
 import os
 
 import httpx
 
 from app.models import Task
 
-
-def pick_mode():
-    key = os.getenv("OPENAI_API_KEY", "").strip()
-    if key:
-        return "openai", key
-    return "mock", ""
 
 
 
@@ -52,5 +46,7 @@ def openai_summary(tasks: list[Task], api_key: str) -> str:
 
 
 def build_daily_summary(tasks: list[Task]) -> tuple[str, str]:
-    mode, key = pick_mode()
+    key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not key:
+        raise RuntimeError("OPENAI_API_KEY is not set")
     return openai_summary(tasks, key), "openai"
