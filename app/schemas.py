@@ -6,6 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # matches what we store in sqlite
 Status = Literal["todo", "in_progress", "done"]
+# daily planning style, not tech stack
+Category = Literal["today", "this_week", "routine", "backlog"]
 
 
 class TaskCreate(BaseModel):
@@ -15,6 +17,7 @@ class TaskCreate(BaseModel):
     description: str | None = Field(default=None, max_length=8000)
     status: Status = "todo"
     due_date: datetime | None = None
+    category: Category | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -24,6 +27,7 @@ class TaskUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=8000)
     status: Status | None = None
     due_date: datetime | None = None
+    category: Category | None = None
 
 
 class TaskOut(BaseModel):
@@ -35,3 +39,5 @@ class TaskOut(BaseModel):
     status: str
     created_at: datetime
     due_date: datetime | None
+    category: str | None
+    completed_at: datetime | None

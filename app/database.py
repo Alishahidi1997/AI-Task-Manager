@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 # sqlite file lives next to requirements.txt (repo root)
@@ -20,6 +20,25 @@ engine = create_engine(
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def migrate_sqlite(engine):
+    # sqlite has no real migrations in this repo — add missing cols by hand
+    with engine.begin() as conn:
+        rows = conn.execute(text("PRAGMA table_info(tasks)")).fetchall()
+        col_names = {r[1] for r in rows}
+        if "category" not in col_names:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN category VARCHAR(64)"))
+        if "completed_at" not in col_names:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN completed_at DATETIME"))
+
+        # old demo used backend/frontend buckets — fold into daily-style labels
+        conn.execute(
+            text(
+                "UPDATE tasks SET category = 'backlog' "
+                "WHERE category IN ('backend','frontend','admin','general')"
+            )
+        )
 
 
 def get_db():

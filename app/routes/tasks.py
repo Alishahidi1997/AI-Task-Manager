@@ -4,8 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Task
+from app.models import Task, utcnow
 from app.schemas import Status, TaskCreate, TaskOut, TaskUpdate
+from app.services.category_guess import guess_category
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -30,11 +31,21 @@ def _check_status_transition(current_status: str, next_status: str):
 
 @router.post("", response_model=TaskOut, status_code=status.HTTP_201_CREATED)
 def create_task(payload: TaskCreate, db: Session = Depends(get_db)):
+    cat = payload.category
+    if cat is None:
+        cat = guess_category(payload.title, payload.description or "", payload.due_date)
+
+    done_at = None
+    if payload.status == "done":
+        done_at = utcnow()
+
     task = Task(
         title=payload.title,
         description=payload.description,
         status=payload.status,
         due_date=payload.due_date,
+        category=cat,
+        completed_at=done_at,
     )
     db.add(task)
     db.commit()
@@ -79,13 +90,26 @@ def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)
     if not task:
         raise HTTPException(status_code=404, detail="task not found")
 
+    old_status = task.status
     updates = payload.model_dump(exclude_unset=True)
     next_status = updates.get("status")
     if next_status is not None:
-        _check_status_transition(task.status, next_status)
+        _check_status_transition(old_status, next_status)
 
     for key, value in updates.items():
         setattr(task, key, value)
+
+    if (
+        ("title" in updates or "description" in updates or "due_date" in updates)
+        and "category" not in updates
+    ):
+        task.category = guess_category(task.title, task.description or "", task.due_date)
+
+    new_status = task.status
+    if new_status == "done" and old_status != "done":
+        task.completed_at = utcnow()
+    elif old_status == "done" and new_status != "done":
+        task.completed_at = None
 
     db.add(task)
     db.commit()
