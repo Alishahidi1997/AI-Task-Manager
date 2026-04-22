@@ -5,12 +5,20 @@ import {
   createTask,
   deleteTask,
   getDailySummary,
+  getWeeklyRetro,
   getPrioritySuggestions,
   getProductivityInsights,
   listTasks,
   updateTaskStatus,
 } from "./api";
-import type { DailySummaryResponse, PriorityResponse, ProductivityResponse, Task, TaskStatus } from "./api";
+import type {
+  DailySummaryResponse,
+  PriorityResponse,
+  ProductivityResponse,
+  Task,
+  TaskStatus,
+  WeeklyRetroResponse,
+} from "./api";
 
 function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -26,6 +34,7 @@ function App() {
   const [filterDueBefore, setFilterDueBefore] = useState("");
   const [filterDueAfter, setFilterDueAfter] = useState("");
   const [dailySummary, setDailySummary] = useState<DailySummaryResponse | null>(null);
+  const [weeklyRetro, setWeeklyRetro] = useState<WeeklyRetroResponse | null>(null);
   const [productivity, setProductivity] = useState<ProductivityResponse | null>(null);
   const [priority, setPriority] = useState<PriorityResponse | null>(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
@@ -116,12 +125,14 @@ function App() {
     setInsightsLoading(true);
     setInsightsError("");
     try {
-      const [summaryData, productivityData, priorityData] = await Promise.all([
+      const [summaryData, weeklyRetroData, productivityData, priorityData] = await Promise.all([
         getDailySummary(),
+        getWeeklyRetro(),
         getProductivityInsights(),
         getPrioritySuggestions(),
       ]);
       setDailySummary(summaryData);
+      setWeeklyRetro(weeklyRetroData);
       setProductivity(productivityData);
       setPriority(priorityData);
     } catch (err) {
@@ -274,6 +285,29 @@ function App() {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section className="panel">
+        <h2>Weekly retro</h2>
+        {weeklyRetro ? (
+          <div className="insight-block">
+            <small>
+              completed: {weeklyRetro.metrics.completed_this_week} | overdue:{" "}
+              {weeklyRetro.metrics.overdue_open_tasks}
+            </small>
+            <p>
+              <strong>What went well:</strong> {weeklyRetro.what_went_well}
+            </p>
+            <p>
+              <strong>What slipped:</strong> {weeklyRetro.what_slipped}
+            </p>
+            <p>
+              <strong>Next week focus:</strong> {weeklyRetro.next_week_focus}
+            </p>
+          </div>
+        ) : (
+          <p className="muted">No weekly retro data yet.</p>
+        )}
       </section>
 
       <section className="panel">

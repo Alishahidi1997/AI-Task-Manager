@@ -44,6 +44,20 @@ export type PriorityResponse = {
   tasks: PriorityTask[];
 };
 
+export type WeeklyRetroResponse = {
+  generated_at: string;
+  window_days: number;
+  metrics: {
+    completed_this_week: number;
+    overdue_open_tasks: number;
+    top_completed_bucket: string | null;
+    top_slipping_bucket: string | null;
+  };
+  what_went_well: string;
+  what_slipped: string;
+  next_week_focus: string;
+};
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -104,4 +118,8 @@ export async function getProductivityInsights(): Promise<ProductivityResponse> {
 
 export async function getPrioritySuggestions(): Promise<PriorityResponse> {
   return request<PriorityResponse>("/insights/priority");
+}
+
+export async function getWeeklyRetro(): Promise<WeeklyRetroResponse> {
+  return request<WeeklyRetroResponse>("/summary/weekly-retro");
 }
