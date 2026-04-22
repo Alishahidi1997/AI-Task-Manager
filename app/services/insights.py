@@ -1,5 +1,5 @@
 # productivity numbers from done tasks (needs completed_at filled when they hit done)
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 def _bucket_for_task(task, guess_fn):
@@ -123,4 +123,91 @@ def build_priority_suggestions(tasks, guess_fn):
         "total_overdue": len(overdue),
         "suggestion": suggestion,
         "tasks": top,
+    }
+
+
+def build_weekly_retro(done_tasks, open_tasks, guess_fn):
+    now = datetime.now(timezone.utc)
+    week_start = now - timedelta(days=7)
+
+    completed_this_week = []
+    for t in done_tasks:
+        done_at = _as_utc(getattr(t, "completed_at", None))
+        if done_at is None:
+            continue
+        if done_at >= week_start:
+            completed_this_week.append(t)
+
+    overdue_open = []
+    for t in open_tasks:
+        due_utc = _as_utc(getattr(t, "due_date", None))
+        if due_utc is None:
+            continue
+        if due_utc < now and getattr(t, "status", "") != "done":
+            overdue_open.append((t, due_utc))
+
+    done_by_bucket = {}
+    for t in completed_this_week:
+        cat = _bucket_for_task(t, guess_fn)
+        done_by_bucket[cat] = done_by_bucket.get(cat, 0) + 1
+
+    overdue_by_bucket = {}
+    for t, _ in overdue_open:
+        cat = _bucket_for_task(t, guess_fn)
+        overdue_by_bucket[cat] = overdue_by_bucket.get(cat, 0) + 1
+
+    top_done_bucket = max(done_by_bucket.items(), key=lambda x: x[1])[0] if done_by_bucket else None
+    top_slip_bucket = (
+        max(overdue_by_bucket.items(), key=lambda x: x[1])[0] if overdue_by_bucket else None
+    )
+
+    if completed_this_week:
+        went_well = (
+            f"You completed {len(completed_this_week)} task(s) this week. "
+            + (
+                f"Strongest momentum was in '{top_done_bucket}' work."
+                if top_done_bucket
+                else "Nice steady execution across your tasks."
+            )
+        )
+    else:
+        went_well = "You did not complete tasks this week yet, but your planning data is in place."
+
+    if overdue_open:
+        oldest_task, oldest_due = min(overdue_open, key=lambda pair: pair[1])
+        slipped = (
+            f"{len(overdue_open)} task(s) are overdue right now. "
+            + (
+                f"Most slippage is in '{top_slip_bucket}' tasks. "
+                if top_slip_bucket
+                else ""
+            )
+            + f"Oldest overdue item: '{oldest_task.title}' (due {oldest_due.date().isoformat()})."
+        )
+    else:
+        slipped = "No overdue tasks this week. Delivery risk looks controlled."
+
+    if overdue_open:
+        focus = (
+            "Next week focus: clear the oldest overdue tasks first, then protect one daily block "
+            "for high-priority work before adding new tasks."
+        )
+    else:
+        focus = (
+            "Next week focus: keep this pace and prioritize strategic tasks by setting 2-3 "
+            "must-complete items at the start of each day."
+        )
+
+    return {
+        "generated_at": now.isoformat(),
+        "window_days": 7,
+        "metrics": {
+            "completed_this_week": len(completed_this_week),
+            "overdue_open_tasks": len(overdue_open),
+            "top_completed_bucket": top_done_bucket,
+            "top_slipping_bucket": top_slip_bucket,
+        },
+        "what_went_well": went_well,
+        "what_slipped": slipped,
+        "next_week_focus": focus,
     }
