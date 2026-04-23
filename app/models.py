@@ -20,6 +20,7 @@ class Task(Base):
     due_date = Column(DateTime(timezone=True), nullable=True)
     category = Column(String(64), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
+    user_id = Column(Integer, nullable=False, default=1)
 
 
 class DailySummary(Base):
@@ -31,4 +32,14 @@ class DailySummary(Base):
     task_count = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     is_error = Column(Integer, nullable=False, default=0)
+    user_id = Column(Integer, nullable=False, default=1)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String(255), nullable=False, unique=True)
+    password_hash = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 

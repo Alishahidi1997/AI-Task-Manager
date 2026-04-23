@@ -1,8 +1,9 @@
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from app.auth import get_current_user
 from app.database import get_db
-from app.models import Task
+from app.models import Task, User
 from app.services.ai_summary import build_daily_summary
 from app.services.category_guess import guess_category
 from app.services.insights import build_weekly_retro
@@ -11,9 +12,9 @@ router = APIRouter(prefix="/summary", tags=["summary"])
 
 
 @router.get("/daily")
-def daily_summary(db: Session = Depends(get_db)):
+def daily_summary(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     tasks = (
-        db.query(Task).filter(Task.status == "done")
+        db.query(Task).filter(Task.status == "done", Task.user_id == current_user.id)
         .order_by(Task.id.desc()).limit(20).all()
     )
 
@@ -34,7 +35,19 @@ def daily_summary(db: Session = Depends(get_db)):
 
 
 @router.get("/weekly-retro")
-def weekly_retro(db: Session = Depends(get_db)):
-    done = db.query(Task).filter(Task.status == "done").order_by(Task.id.desc()).limit(400).all()
-    open_tasks = db.query(Task).filter(Task.status != "done").order_by(Task.id.desc()).limit(400).all()
+def weekly_retro(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    done = (
+        db.query(Task)
+        .filter(Task.status == "done", Task.user_id == current_user.id)
+        .order_by(Task.id.desc())
+        .limit(400)
+        .all()
+    )
+    open_tasks = (
+        db.query(Task)
+        .filter(Task.status != "done", Task.user_id == current_user.id)
+        .order_by(Task.id.desc())
+        .limit(400)
+        .all()
+    )
     return build_weekly_retro(done, open_tasks, guess_category)

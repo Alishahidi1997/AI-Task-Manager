@@ -3,8 +3,9 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from app.auth import get_current_user
 from app.database import get_db
-from app.models import Task, utcnow
+from app.models import Task, User, utcnow
 from app.schemas import Status, TaskCreate, TaskOut, TaskUpdate
 from app.services.category_guess import guess_category
 
@@ -30,7 +31,11 @@ def _check_status_transition(current_status: str, next_status: str):
 
 
 @router.post("", response_model=TaskOut, status_code=status.HTTP_201_CREATED)
-def create_task(payload: TaskCreate, db: Session = Depends(get_db)):
+def create_task(
+    payload: TaskCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     cat = payload.category
     if cat is None:
         cat = guess_category(payload.title, payload.description or "", payload.due_date)
@@ -46,6 +51,7 @@ def create_task(payload: TaskCreate, db: Session = Depends(get_db)):
         due_date=payload.due_date,
         category=cat,
         completed_at=done_at,
+        user_id=current_user.id,
     )
     db.add(task)
     db.commit()
@@ -61,8 +67,9 @@ def list_tasks(
     
     due_after: datetime | None = Query(default=None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    q = db.query(Task)
+    q = db.query(Task).filter(Task.user_id == current_user.id)
     if status_filter is not None:
         q = q.filter(Task.status == status_filter)
     if due_before is not None:
@@ -77,16 +84,21 @@ def list_tasks(
 
 
 @router.get("/{task_id}", response_model=TaskOut)
-def get_task(task_id: int, db: Session = Depends(get_db)):
-    task = db.query(Task).filter(Task.id == task_id).first()
+def get_task(task_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    task = db.query(Task).filter(Task.id == task_id, Task.user_id == current_user.id).first()
     if not task:
         raise HTTPException(status_code=404, detail="task not found")
     return task
 
 
 @router.put("/{task_id}", response_model=TaskOut)
-def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)):
-    task = db.query(Task).filter(Task.id == task_id).first()
+def update_task(
+    task_id: int,
+    payload: TaskUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task = db.query(Task).filter(Task.id == task_id, Task.user_id == current_user.id).first()
     if not task:
         raise HTTPException(status_code=404, detail="task not found")
 
@@ -118,8 +130,12 @@ def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)
 
 
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_task(task_id: int, db: Session = Depends(get_db)):
-    task = db.query(Task).filter(Task.id == task_id).first()
+def delete_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task = db.query(Task).filter(Task.id == task_id, Task.user_id == current_user.id).first()
     if not task:
         raise HTTPException(status_code=404, detail="task not found")
     db.delete(task)

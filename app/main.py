@@ -3,8 +3,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.auth import hash_password
 from app.database import Base, SessionLocal, engine, migrate_sqlite
-from app.models import Task
+from app.models import Task, User
+from app.routes.auth import router as auth_router
 from app.routes.insights import router as insights_router
 from app.routes.summary import router as summary_router
 from app.routes.tasks import router as tasks_router
@@ -23,10 +25,25 @@ async def lifespan(app: FastAPI):
     # Backfill legacy rows so smart grouping is stored on each task.
     db = SessionLocal()
     try:
+        demo = db.query(User).filter(User.email == "demo@smarttracker.local").first()
+        if not demo:
+            demo = User(
+                email="demo@smarttracker.local",
+                password_hash=hash_password("demo1234"),
+            )
+            db.add(demo)
+            db.commit()
+            db.refresh(demo)
+
+        # Ensure existing rows are owned by demo user after migration.
+        orphan_tasks = db.query(Task).filter(Task.user_id.is_(None)).all()
+        for task in orphan_tasks:
+            task.user_id = demo.id
+
         uncategorized = db.query(Task).filter(Task.category.is_(None)).all()
         for task in uncategorized:
             task.category = guess_category(task.title, task.description or "", task.due_date)
-        if uncategorized:
+        if uncategorized or orphan_tasks:
             db.commit()
     finally:
         db.close()
@@ -47,6 +64,7 @@ app.add_middleware(
 app.include_router(tasks_router)
 app.include_router(summary_router)
 app.include_router(insights_router)
+app.include_router(auth_router)
 
 
 @app.get("/")
