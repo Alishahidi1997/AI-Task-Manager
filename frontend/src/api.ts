@@ -69,6 +69,15 @@ export type AuthResponse = {
   user: AuthUser;
 };
 
+export type ParsedTaskResponse = {
+  title: string;
+  description: string | null;
+  due_date: string | null;
+  category: TaskCategory;
+  confidence: "low" | "medium" | "high";
+  mode: "openai" | "fallback";
+};
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 const TOKEN_KEY = "smart_tracker_token";
 
@@ -178,5 +187,13 @@ export async function getMe(): Promise<AuthUser> {
 export async function resetDemoData(): Promise<{ ok: boolean; seeded_tasks: number }> {
   return request<{ ok: boolean; seeded_tasks: number }>("/demo/reset", {
     method: "POST",
+  });
+}
+
+export async function parseTaskText(text: string): Promise<ParsedTaskResponse> {
+  return request<ParsedTaskResponse>("/ai/parse-task", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
   });
 }

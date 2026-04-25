@@ -11,6 +11,7 @@ import {
   getPrioritySuggestions,
   getProductivityInsights,
   login,
+  parseTaskText,
   listTasks,
   register,
   resetDemoData,
@@ -53,6 +54,9 @@ function App() {
   const [authError, setAuthError] = useState("");
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [resettingDemo, setResettingDemo] = useState(false);
+  const [aiInput, setAiInput] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiNote, setAiNote] = useState("");
 
   const statusCount = useMemo(() => {
     return tasks.reduce(
@@ -226,6 +230,29 @@ function App() {
     }
   }
 
+  async function handleAiParse() {
+    if (!aiInput.trim()) return;
+    setAiLoading(true);
+    setAiNote("");
+    setError("");
+    try {
+      const parsed = await parseTaskText(aiInput.trim());
+      setTitle(parsed.title ?? "");
+      setDescription(parsed.description ?? "");
+      if (parsed.due_date) {
+        const local = new Date(parsed.due_date);
+        const pad = (n: number) => String(n).padStart(2, "0");
+        const dtLocal = `${local.getFullYear()}-${pad(local.getMonth() + 1)}-${pad(local.getDate())}T${pad(local.getHours())}:${pad(local.getMinutes())}`;
+        setDueDate(dtLocal);
+      }
+      setAiNote(`Parsed with ${parsed.mode} (${parsed.confidence} confidence).`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not parse AI task input");
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -348,6 +375,22 @@ function App() {
             Clear filters
           </button>
         </div>
+          </section>
+
+          <section className="panel">
+            <h2>AI task parser</h2>
+            <p className="muted">Write a natural sentence and auto-fill the form below.</p>
+            <div className="task-form">
+              <textarea
+                value={aiInput}
+                onChange={(e) => setAiInput(e.target.value)}
+                placeholder='Example: "Finish auth docs tomorrow at 5pm and prepare release notes"'
+              />
+              <button type="button" onClick={() => void handleAiParse()} disabled={aiLoading}>
+                {aiLoading ? "Parsing..." : "Parse with AI"}
+              </button>
+              {aiNote ? <p className="muted">{aiNote}</p> : null}
+            </div>
           </section>
 
           <section className="panel">
