@@ -2,49 +2,52 @@ import os
 from datetime import datetime, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.database import SessionLocal
-from app.models import DailySummary, Task
+from app.models import DailySummary, Task, User
 from app.services.ai_summary import build_daily_summary
 
 
 def run_daily_summary_job():
     db = SessionLocal()
     try:
-        done_tasks = (
-            db.query(Task)
-            .filter(Task.status == "done")
-            .order_by(Task.id.desc())
-            .limit(50)
-            .all()
-        )
+        users = db.query(User).order_by(User.id.asc()).all()
+        for user in users:
+            try:
+                done_tasks = (
+                    db.query(Task)
+                    .filter(Task.status == "done", Task.user_id == user.id)
+                    .order_by(Task.id.desc())
+                    .limit(50)
+                    .all()
+                )
+                text, mode = build_daily_summary(done_tasks)
+                row = DailySummary(
+                    summary_text=text,
+                    mode=mode,
+                    task_count=len(done_tasks),
+                    is_error=0,
+                    user_id=user.id,
+                )
+                db.add(row)
+                db.commit()
 
-        text, mode = build_daily_summary(done_tasks)
-
-        row = DailySummary(
-            summary_text=text,
-            mode=mode,
-            task_count=len(done_tasks),
-            is_error=0,
-        )
-        db.add(row)
-        db.commit()
-
-        now = datetime.now(timezone.utc).isoformat()
-        print(f"[scheduler] {now} mode={mode} tasks={len(done_tasks)}")
-        print(f"[scheduler] summary: {text}")
+                now = datetime.now(timezone.utc).isoformat()
+                print(
+                    f"[scheduler] {now} user={user.id} mode={mode} tasks={len(done_tasks)}"
+                )
+            except Exception as e:
+                db.rollback()
+                row = DailySummary(
+                    summary_text="ERROR: " + str(e),
+                    mode="openai",
+                    task_count=0,
+                    is_error=1,
+                    user_id=user.id,
+                )
+                db.add(row)
+                db.commit()
+                print(f"[scheduler] daily summary failed for user={user.id}: {e}")
     except Exception as e:
         db.rollback()
-        err_text = str(e)
-        try:
-            row = DailySummary(
-                summary_text="ERROR: " + err_text,
-                mode="openai",
-                task_count=0,
-                is_error=1,
-            )
-            db.add(row)
-            db.commit()
-        except Exception:
-            db.rollback()
         print(f"[scheduler] daily summary failed: {e}")
     finally:
         db.close()
