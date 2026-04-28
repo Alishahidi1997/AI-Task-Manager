@@ -32,12 +32,18 @@ def _fallback_parse(input_text: str):
 
     category = guess_category(title, description or "", due_date)
 
+    confidence = "low"
+    if title and len(title.split()) >= 3:
+        confidence = "medium"
+    if due_date and title and len(title.split()) >= 3:
+        confidence = "high"
+
     return {
         "title": title[:255],
         "description": (description or "")[:8000] or None,
         "due_date": due_date.isoformat() if due_date else None,
         "category": category,
-        "confidence": "low",
+        "confidence": confidence,
         "mode": "fallback",
     }
 
@@ -100,8 +106,12 @@ def _openai_parse(input_text: str, api_key: str):
 def parse_task_text(input_text: str):
     key = os.getenv("OPENAI_API_KEY", "").strip()
     if not key:
-        return _fallback_parse(input_text)
+        parsed = _fallback_parse(input_text)
+        parsed["reason"] = "OPENAI_API_KEY is not set; used local parser fallback."
+        return parsed
     try:
         return _openai_parse(input_text, key)
-    except Exception:
-        return _fallback_parse(input_text)
+    except Exception as exc:
+        parsed = _fallback_parse(input_text)
+        parsed["reason"] = f"OpenAI parse failed ({type(exc).__name__}); used local parser fallback."
+        return parsed

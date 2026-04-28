@@ -76,6 +76,13 @@ export type ParsedTaskResponse = {
   category: TaskCategory;
   confidence: "low" | "medium" | "high";
   mode: "openai" | "fallback";
+  reason?: string;
+};
+
+export type DemoScenario = {
+  id: string;
+  label: string;
+  description: string;
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -188,6 +195,21 @@ export async function resetDemoData(): Promise<{ ok: boolean; seeded_tasks: numb
   return request<{ ok: boolean; seeded_tasks: number }>("/demo/reset", {
     method: "POST",
   });
+}
+
+export async function listDemoScenarios(): Promise<{ ok: boolean; scenarios: DemoScenario[] }> {
+  return request<{ ok: boolean; scenarios: DemoScenario[] }>("/demo/scenarios");
+}
+
+export async function loadDemoScenario(
+  scenarioId: string,
+): Promise<{ ok: boolean; scenario_id: string; seeded_tasks: number }> {
+  return request<{ ok: boolean; scenario_id: string; seeded_tasks: number }>(
+    `/demo/load/${encodeURIComponent(scenarioId)}`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 export async function parseTaskText(text: string): Promise<ParsedTaskResponse> {

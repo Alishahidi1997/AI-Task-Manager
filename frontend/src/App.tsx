@@ -10,7 +10,9 @@ import {
   getWeeklyRetro,
   getPrioritySuggestions,
   getProductivityInsights,
+  listDemoScenarios,
   login,
+  loadDemoScenario,
   parseTaskText,
   listTasks,
   register,
@@ -24,6 +26,7 @@ import { TaskListPanel } from "./components/TaskListPanel";
 import type {
   AuthUser,
   DailySummaryResponse,
+  DemoScenario,
   PriorityResponse,
   ProductivityResponse,
   Task,
@@ -57,6 +60,10 @@ function App() {
   const [authError, setAuthError] = useState("");
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [resettingDemo, setResettingDemo] = useState(false);
+  const [demoScenarios, setDemoScenarios] = useState<DemoScenario[]>([]);
+  const [selectedScenarioId, setSelectedScenarioId] = useState("default");
+  const [loadingScenarios, setLoadingScenarios] = useState(false);
+  const [loadingScenario, setLoadingScenario] = useState(false);
   const [aiInput, setAiInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiNote, setAiNote] = useState("");
@@ -191,6 +198,15 @@ function App() {
     void hydrateUserFromToken();
   }, []);
 
+  useEffect(() => {
+    if (isDemoUser) {
+      void loadScenarios();
+      return;
+    }
+    setDemoScenarios([]);
+    setSelectedScenarioId("default");
+  }, [isDemoUser]);
+
   async function handleAuthSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setAuthLoading(true);
@@ -233,6 +249,38 @@ function App() {
     }
   }
 
+  async function loadScenarios() {
+    if (!isDemoUser) return;
+    setLoadingScenarios(true);
+    setError("");
+    try {
+      const response = await listDemoScenarios();
+      setDemoScenarios(response.scenarios);
+      if (!response.scenarios.some((item) => item.id === selectedScenarioId)) {
+        setSelectedScenarioId(response.scenarios[0]?.id ?? "default");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load demo scenarios");
+    } finally {
+      setLoadingScenarios(false);
+    }
+  }
+
+  async function handleLoadScenario() {
+    if (!selectedScenarioId) return;
+    setLoadingScenario(true);
+    setError("");
+    try {
+      await loadDemoScenario(selectedScenarioId);
+      await loadTasks();
+      await loadInsights();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load demo scenario");
+    } finally {
+      setLoadingScenario(false);
+    }
+  }
+
   async function handleAiParse() {
     if (!aiInput.trim()) return;
     setAiLoading(true);
@@ -248,7 +296,8 @@ function App() {
         const dtLocal = `${local.getFullYear()}-${pad(local.getMonth() + 1)}-${pad(local.getDate())}T${pad(local.getHours())}:${pad(local.getMinutes())}`;
         setDueDate(dtLocal);
       }
-      setAiNote(`Parsed with ${parsed.mode} (${parsed.confidence} confidence).`);
+      const reasonText = parsed.reason ? ` ${parsed.reason}` : "";
+      setAiNote(`Parsed with ${parsed.mode} (${parsed.confidence} confidence).${reasonText}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not parse AI task input");
     } finally {
@@ -287,7 +336,11 @@ function App() {
               <h2>Session</h2>
               <div className="task-actions">
                 {isDemoUser ? (
-                  <button type="button" onClick={() => void handleResetDemo()} disabled={resettingDemo}>
+                  <button
+                    type="button"
+                    onClick={() => void handleResetDemo()}
+                    disabled={resettingDemo || loadingScenario}
+                  >
                     {resettingDemo ? "Resetting demo..." : "Reset demo data"}
                   </button>
                 ) : null}
@@ -298,9 +351,48 @@ function App() {
             </div>
             <p className="muted">Your data is isolated to this account.</p>
             {isDemoUser ? (
-              <p className="muted">
-                Demo mode reset requires backend env: <code>DEMO_MODE=true</code>.
-              </p>
+              <>
+                <p className="muted">
+                  Demo mode reset/scenario loading requires backend env: <code>DEMO_MODE=true</code>.
+                </p>
+                <div className="task-actions">
+                  <select
+                    value={selectedScenarioId}
+                    onChange={(e) => setSelectedScenarioId(e.target.value)}
+                    disabled={loadingScenarios || loadingScenario || resettingDemo}
+                  >
+                    {demoScenarios.map((scenario) => (
+                      <option key={scenario.id} value={scenario.id}>
+                        {scenario.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => void handleLoadScenario()}
+                    disabled={
+                      loadingScenarios ||
+                      loadingScenario ||
+                      resettingDemo ||
+                      demoScenarios.length === 0
+                    }
+                  >
+                    {loadingScenario ? "Loading scenario..." : "Load scenario"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void loadScenarios()}
+                    disabled={loadingScenarios || loadingScenario || resettingDemo}
+                  >
+                    {loadingScenarios ? "Refreshing..." : "Refresh scenarios"}
+                  </button>
+                </div>
+                {demoScenarios.length > 0 ? (
+                  <p className="muted">
+                    {demoScenarios.find((scenario) => scenario.id === selectedScenarioId)?.description}
+                  </p>
+                ) : null}
+              </>
             ) : null}
           </section>
 
