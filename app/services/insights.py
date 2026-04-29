@@ -211,3 +211,64 @@ def build_weekly_retro(done_tasks, open_tasks, guess_fn):
         "what_slipped": slipped,
         "next_week_focus": focus,
     }
+
+
+def build_insight_explanation(insight_id, done_tasks, pending_tasks, guess_fn):
+    now = datetime.now(timezone.utc)
+    if insight_id == "productivity":
+        rows = build_productivity_insights(done_tasks, guess_fn).get("buckets", [])
+        if not rows:
+            return {
+                "insight_id": insight_id,
+                "title": "Why productivity insight is limited",
+                "why": [
+                    "There are not enough completed tasks with valid timestamps yet.",
+                    "Productivity insight needs both created and completed times to calculate speed.",
+                    "Mark more tasks as done to improve confidence and bucket comparisons.",
+                ],
+                "generated_at": now.isoformat(),
+            }
+        fastest = rows[0]
+        slowest = rows[-1]
+        return {
+            "insight_id": insight_id,
+            "title": "Why this productivity insight was generated",
+            "why": [
+                f"Completed tasks are grouped by planning bucket such as '{fastest['category']}'.",
+                "For each bucket, completion speed is calculated using completed_at - created_at.",
+                f"Current fastest bucket is '{fastest['category']}' at {fastest['avg_hours_to_complete']}h average.",
+                f"Current slowest bucket is '{slowest['category']}' at {slowest['avg_hours_to_complete']}h average.",
+            ],
+            "generated_at": now.isoformat(),
+        }
+
+    if insight_id == "priority":
+        data = build_priority_suggestions(pending_tasks, guess_fn)
+        tasks = data.get("tasks", [])
+        if not tasks:
+            return {
+                "insight_id": insight_id,
+                "title": "Why priority suggestions look healthy",
+                "why": [
+                    "No open task is currently overdue.",
+                    "Priority insight only escalates tasks where due_date is in the past and status is not done.",
+                    "As soon as overdue items appear, they are ranked by urgency.",
+                ],
+                "generated_at": now.isoformat(),
+            }
+
+        highest = max(tasks, key=lambda t: t["hours_overdue"])
+        high_count = sum(1 for t in tasks if t["priority"] == "high")
+        return {
+            "insight_id": insight_id,
+            "title": "Why these tasks are prioritized",
+            "why": [
+                "Only open tasks with due dates in the past are included in this insight.",
+                "Priority level is based on overdue hours (>=72h high, >=24h medium, otherwise low).",
+                f"There are {high_count} high-priority overdue task(s) in the current result set.",
+                f"Most overdue task is '{highest['title']}' at {highest['hours_overdue']}h overdue.",
+            ],
+            "generated_at": now.isoformat(),
+        }
+
+    return None
