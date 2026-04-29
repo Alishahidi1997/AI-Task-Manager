@@ -86,6 +86,22 @@ export type ParsedTaskResponse = {
   reason?: string;
 };
 
+export type PlannedRoadmapTask = {
+  order: number;
+  title: string;
+  description: string | null;
+  due_date: string | null;
+  category: TaskCategory;
+  priority: "low" | "medium" | "high";
+};
+
+export type PlannedRoadmapResponse = {
+  roadmap_title: string;
+  tasks: PlannedRoadmapTask[];
+  mode: "openai" | "fallback";
+  reason?: string;
+};
+
 export type DemoScenario = {
   id: string;
   label: string;
@@ -142,6 +158,7 @@ export async function createTask(payload: {
   title: string;
   description: string | null;
   due_date: string | null;
+  category?: TaskCategory | null;
 }): Promise<Task> {
   return request<Task>("/tasks", {
     method: "POST",
@@ -231,5 +248,17 @@ export async function parseTaskText(text: string): Promise<ParsedTaskResponse> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, timezone: userTimezone }),
+  });
+}
+
+export async function planTaskRoadmap(
+  text: string,
+  horizonDays = 7,
+): Promise<PlannedRoadmapResponse> {
+  const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  return request<PlannedRoadmapResponse>("/ai/plan-task", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, timezone: userTimezone, horizon_days: horizonDays }),
   });
 }

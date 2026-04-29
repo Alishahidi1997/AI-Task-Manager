@@ -152,3 +152,120 @@ def parse_task_text(input_text: str, user_timezone: str | None = None):
         parsed = _fallback_parse(input_text, user_timezone)
         parsed["reason"] = f"OpenAI parse failed ({type(exc).__name__}); used local parser fallback."
         return parsed
+
+
+def _fallback_plan_task_text(input_text: str, user_timezone: str | None):
+    separators = re.split(r"\band\b|,|;|\n", input_text, flags=re.IGNORECASE)
+    parts = [p.strip(" .") for p in separators if p and p.strip(" .")]
+    if not parts:
+        parts = [input_text.strip()]
+
+    global_parse = _fallback_parse(input_text, user_timezone)
+    tasks = []
+    for idx, chunk in enumerate(parts[:8], start=1):
+        parsed = _fallback_parse(chunk, user_timezone)
+        due_date = parsed.get("due_date") or global_parse.get("due_date")
+        tasks.append(
+            {
+                "order": idx,
+                "title": parsed.get("title") or chunk[:255],
+                "description": parsed.get("description"),
+                "due_date": due_date,
+                "category": parsed.get("category") or "backlog",
+                "priority": "medium",
+            }
+        )
+
+    return {
+        "roadmap_title": f"Roadmap: {input_text.strip()[:80]}",
+        "tasks": tasks,
+        "mode": "fallback",
+        "reason": "OPENAI_API_KEY is not set; used local roadmap fallback.",
+    }
+
+
+def _openai_plan_task_text(input_text: str, api_key: str, user_timezone: str | None, horizon_days: int):
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+    tz = _resolve_tz(user_timezone)
+    now = datetime.now(tz).isoformat()
+    tz_name = user_timezone.strip() if user_timezone else "UTC"
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Break goal text into an actionable roadmap. Return strict JSON only with keys: "
+                "roadmap_title, tasks. tasks is an array of objects with keys: order, title, description, due_date, category, priority. "
+                "category must be one of: today,this_week,routine,backlog. "
+                "priority must be one of: low,medium,high. "
+                "due_date must be ISO-8601 with timezone or null. Keep 2-8 tasks max."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"User timezone: {tz_name}\nNow: {now}\nHorizon days: {horizon_days}\n"
+                f"Goal text: {input_text}"
+            ),
+        },
+    ]
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0.2,
+        "max_tokens": 700,
+        "response_format": {"type": "json_object"},
+    }
+
+    with httpx.Client(timeout=45.0) as client:
+        response = client.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": "Bearer " + api_key,
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+    parsed = json.loads(data["choices"][0]["message"]["content"])
+    tasks = []
+    for idx, item in enumerate((parsed.get("tasks") or [])[:8], start=1):
+        category = str(item.get("category") or "backlog")
+        if category not in {"today", "this_week", "routine", "backlog"}:
+            category = "backlog"
+        priority = str(item.get("priority") or "medium")
+        if priority not in {"low", "medium", "high"}:
+            priority = "medium"
+        tasks.append(
+            {
+                "order": int(item.get("order") or idx),
+                "title": str(item.get("title") or f"Step {idx}").strip()[:255],
+                "description": (str(item.get("description") or "").strip()[:8000] or None),
+                "due_date": item.get("due_date"),
+                "category": category,
+                "priority": priority,
+            }
+        )
+
+    if not tasks:
+        return _fallback_plan_task_text(input_text, user_timezone)
+
+    return {
+        "roadmap_title": str(parsed.get("roadmap_title") or f"Roadmap: {input_text[:80]}").strip()[:160],
+        "tasks": tasks,
+        "mode": "openai",
+    }
+
+
+def plan_task_text(input_text: str, user_timezone: str | None = None, horizon_days: int = 7):
+    safe_horizon = max(1, min(30, int(horizon_days)))
+    key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not key:
+        return _fallback_plan_task_text(input_text, user_timezone)
+    try:
+        return _openai_plan_task_text(input_text, key, user_timezone, safe_horizon)
+    except Exception as exc:
+        parsed = _fallback_plan_task_text(input_text, user_timezone)
+        parsed["reason"] = f"OpenAI roadmap failed ({type(exc).__name__}); used local roadmap fallback."
+        return parsed

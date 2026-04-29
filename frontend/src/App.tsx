@@ -14,6 +14,7 @@ import {
   listDemoScenarios,
   login,
   loadDemoScenario,
+  planTaskRoadmap,
   parseTaskText,
   listTasks,
   register,
@@ -29,6 +30,7 @@ import type {
   DailySummaryResponse,
   DemoScenario,
   InsightExplanationResponse,
+  PlannedRoadmapTask,
   PriorityResponse,
   ProductivityResponse,
   Task,
@@ -68,7 +70,13 @@ function App() {
   const [loadingScenario, setLoadingScenario] = useState(false);
   const [aiInput, setAiInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiPlanLoading, setAiPlanLoading] = useState(false);
+  const [aiCreateRoadmapLoading, setAiCreateRoadmapLoading] = useState(false);
   const [aiNote, setAiNote] = useState("");
+  const [roadmapTitle, setRoadmapTitle] = useState("");
+  const [roadmapMode, setRoadmapMode] = useState("");
+  const [roadmapReason, setRoadmapReason] = useState("");
+  const [roadmapTasks, setRoadmapTasks] = useState<PlannedRoadmapTask[]>([]);
   const [insightExplanations, setInsightExplanations] = useState<
     Record<string, InsightExplanationResponse | null>
   >({});
@@ -311,6 +319,48 @@ function App() {
     }
   }
 
+  async function handleAiPlan() {
+    if (!aiInput.trim()) return;
+    setAiPlanLoading(true);
+    setAiNote("");
+    setError("");
+    try {
+      const roadmap = await planTaskRoadmap(aiInput.trim(), 7);
+      setRoadmapTitle(roadmap.roadmap_title);
+      setRoadmapMode(roadmap.mode);
+      setRoadmapReason(roadmap.reason ?? "");
+      setRoadmapTasks(roadmap.tasks);
+      setAiNote(`Roadmap generated with ${roadmap.mode} (${roadmap.tasks.length} task steps).`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not generate roadmap");
+    } finally {
+      setAiPlanLoading(false);
+    }
+  }
+
+  async function handleCreateRoadmapTasks() {
+    if (roadmapTasks.length === 0) return;
+    setAiCreateRoadmapLoading(true);
+    setError("");
+    try {
+      for (const task of roadmapTasks) {
+        await createTask({
+          title: task.title,
+          description: task.description,
+          due_date: task.due_date,
+          category: task.category,
+        });
+      }
+      await loadTasks();
+      await loadInsights();
+      setAiNote(`Created ${roadmapTasks.length} roadmap task(s).`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create roadmap tasks");
+    } finally {
+      setAiCreateRoadmapLoading(false);
+    }
+  }
+
   async function handleExplainInsight(insightId: string) {
     setExplainingInsightId(insightId);
     setError("");
@@ -469,13 +519,21 @@ function App() {
           <TaskComposerPanel
             aiInput={aiInput}
             aiLoading={aiLoading}
+            aiPlanLoading={aiPlanLoading}
+            aiCreateRoadmapLoading={aiCreateRoadmapLoading}
             aiNote={aiNote}
+            roadmapTitle={roadmapTitle}
+            roadmapMode={roadmapMode}
+            roadmapReason={roadmapReason}
+            roadmapTasks={roadmapTasks}
             title={title}
             description={description}
             dueDate={dueDate}
             creating={creating}
             onAiInputChange={setAiInput}
             onAiParse={handleAiParse}
+            onAiPlan={handleAiPlan}
+            onCreateRoadmapTasks={handleCreateRoadmapTasks}
             onSubmit={handleCreateTask}
             onTitleChange={setTitle}
             onDescriptionChange={setDescription}
