@@ -58,6 +58,13 @@ export type WeeklyRetroResponse = {
   next_week_focus: string;
 };
 
+export type InsightExplanationResponse = {
+  insight_id: string;
+  title: string;
+  why: string[];
+  generated_at: string;
+};
+
 export type AuthUser = {
   id: number;
   email: string;
@@ -165,6 +172,12 @@ export async function getProductivityInsights(): Promise<ProductivityResponse> {
 
 export async function getPrioritySuggestions(): Promise<PriorityResponse> {
   return request<PriorityResponse>("/insights/priority");
+}
+
+export async function getInsightExplanation(
+  insightId: string,
+): Promise<InsightExplanationResponse> {
+  return request<InsightExplanationResponse>(`/insights/explain/${encodeURIComponent(insightId)}`);
 }
 
 export async function getWeeklyRetro(): Promise<WeeklyRetroResponse> {

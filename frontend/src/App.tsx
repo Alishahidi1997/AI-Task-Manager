@@ -10,6 +10,7 @@ import {
   getWeeklyRetro,
   getPrioritySuggestions,
   getProductivityInsights,
+  getInsightExplanation,
   listDemoScenarios,
   login,
   loadDemoScenario,
@@ -27,6 +28,7 @@ import type {
   AuthUser,
   DailySummaryResponse,
   DemoScenario,
+  InsightExplanationResponse,
   PriorityResponse,
   ProductivityResponse,
   Task,
@@ -67,6 +69,10 @@ function App() {
   const [aiInput, setAiInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiNote, setAiNote] = useState("");
+  const [insightExplanations, setInsightExplanations] = useState<
+    Record<string, InsightExplanationResponse | null>
+  >({});
+  const [explainingInsightId, setExplainingInsightId] = useState<string | null>(null);
 
   const statusCount = useMemo(() => {
     return tasks.reduce(
@@ -305,6 +311,19 @@ function App() {
     }
   }
 
+  async function handleExplainInsight(insightId: string) {
+    setExplainingInsightId(insightId);
+    setError("");
+    try {
+      const data = await getInsightExplanation(insightId);
+      setInsightExplanations((prev) => ({ ...prev, [insightId]: data }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load insight explanation");
+    } finally {
+      setExplainingInsightId(null);
+    }
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -519,7 +538,16 @@ function App() {
           </section>
 
           <section className="panel">
-        <h2>Productivity insights</h2>
+        <div className="list-head">
+          <h2>Productivity insights</h2>
+          <button
+            type="button"
+            onClick={() => void handleExplainInsight("productivity")}
+            disabled={explainingInsightId === "productivity"}
+          >
+            {explainingInsightId === "productivity" ? "Loading why..." : "Why this insight?"}
+          </button>
+        </div>
         {productivity ? (
           <div className="insight-block">
             <p>{productivity.narrative}</p>
@@ -531,6 +559,18 @@ function App() {
                 </li>
               ))}
             </ul>
+            {insightExplanations.productivity ? (
+              <div className="insight-why">
+                <small>
+                  <strong>{insightExplanations.productivity.title}</strong>
+                </small>
+                <ul className="simple-list">
+                  {insightExplanations.productivity.why.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
         ) : (
           <p className="muted">No productivity data yet.</p>
@@ -538,7 +578,16 @@ function App() {
       </section>
 
       <section className="panel">
-        <h2>Priority suggestions</h2>
+        <div className="list-head">
+          <h2>Priority suggestions</h2>
+          <button
+            type="button"
+            onClick={() => void handleExplainInsight("priority")}
+            disabled={explainingInsightId === "priority"}
+          >
+            {explainingInsightId === "priority" ? "Loading why..." : "Why this insight?"}
+          </button>
+        </div>
         {priority ? (
           <div className="insight-block">
             <p>{priority.suggestion}</p>
@@ -550,6 +599,18 @@ function App() {
                 </li>
               ))}
             </ul>
+            {insightExplanations.priority ? (
+              <div className="insight-why">
+                <small>
+                  <strong>{insightExplanations.priority.title}</strong>
+                </small>
+                <ul className="simple-list">
+                  {insightExplanations.priority.why.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
         ) : (
           <p className="muted">No overdue tasks right now.</p>
