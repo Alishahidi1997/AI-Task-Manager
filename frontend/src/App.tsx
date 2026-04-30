@@ -16,6 +16,7 @@ import {
   loadDemoScenario,
   planTaskRoadmap,
   parseTaskText,
+  runAgentCommand,
   listTasks,
   register,
   resetDemoData,
@@ -30,6 +31,7 @@ import type {
   DailySummaryResponse,
   DemoScenario,
   InsightExplanationResponse,
+  AgentActionResult,
   PlannedRoadmapTask,
   PriorityResponse,
   ProductivityResponse,
@@ -81,6 +83,11 @@ function App() {
     Record<string, InsightExplanationResponse | null>
   >({});
   const [explainingInsightId, setExplainingInsightId] = useState<string | null>(null);
+  const [agentQuery, setAgentQuery] = useState("");
+  const [agentLoading, setAgentLoading] = useState(false);
+  const [agentExecuting, setAgentExecuting] = useState(false);
+  const [agentActions, setAgentActions] = useState<AgentActionResult[]>([]);
+  const [agentMessage, setAgentMessage] = useState("");
 
   const statusCount = useMemo(() => {
     return tasks.reduce(
@@ -374,6 +381,38 @@ function App() {
     }
   }
 
+  async function handleAgentPreview() {
+    if (!agentQuery.trim()) return;
+    setAgentLoading(true);
+    setError("");
+    try {
+      const response = await runAgentCommand(agentQuery.trim(), true);
+      setAgentActions(response.actions ?? []);
+      setAgentMessage(response.assistant_message || "Preview generated.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not preview AI command");
+    } finally {
+      setAgentLoading(false);
+    }
+  }
+
+  async function handleAgentExecute() {
+    if (!agentQuery.trim()) return;
+    setAgentExecuting(true);
+    setError("");
+    try {
+      const response = await runAgentCommand(agentQuery.trim(), false);
+      setAgentActions(response.actions ?? []);
+      setAgentMessage(response.assistant_message || "Command executed.");
+      await loadTasks();
+      await loadInsights();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not execute AI command");
+    } finally {
+      setAgentExecuting(false);
+    }
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -539,6 +578,45 @@ function App() {
             onDescriptionChange={setDescription}
             onDueDateChange={setDueDate}
           />
+
+          <section className="panel">
+            <h2>AI Command Console</h2>
+            <p className="muted">
+              Ask AI to create, update, or delete tasks. Preview first, then execute.
+            </p>
+            <div className="task-form">
+              <textarea
+                value={agentQuery}
+                onChange={(e) => setAgentQuery(e.target.value)}
+                placeholder='Example: "Create a task to publish release notes tomorrow 5pm, then mark task 12 done"'
+              />
+              <div className="task-actions">
+                <button type="button" onClick={() => void handleAgentPreview()} disabled={agentLoading}>
+                  {agentLoading ? "Previewing..." : "Preview tool calls"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleAgentExecute()}
+                  disabled={agentExecuting || agentLoading}
+                >
+                  {agentExecuting ? "Executing..." : "Confirm and execute"}
+                </button>
+              </div>
+              {agentMessage ? <p className="muted">{agentMessage}</p> : null}
+              {agentActions.length > 0 ? (
+                <ul className="simple-list">
+                  {agentActions.map((action, idx) => (
+                    <li key={`${action.tool}-${idx}`}>
+                      <strong>{action.tool}</strong>: {action.ok ? "ok" : "failed"}
+                      {action.task_id ? ` (task #${action.task_id})` : ""}
+                      {action.detail ? ` - ${action.detail}` : ""}
+                      {action.task_preview ? ` - ${action.task_preview.title}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          </section>
 
           <TaskListPanel
             tasks={tasks}

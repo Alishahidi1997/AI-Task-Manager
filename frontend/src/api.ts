@@ -102,6 +102,29 @@ export type PlannedRoadmapResponse = {
   reason?: string;
 };
 
+export type AgentActionResult = {
+  tool: string;
+  ok: boolean;
+  detail?: string;
+  task_id?: number;
+  dry_run?: boolean;
+  task_preview?: {
+    title: string;
+    description: string | null;
+    due_date: string | null;
+    category: TaskCategory;
+  };
+};
+
+export type AgentCommandResponse = {
+  ok: boolean;
+  mode: string;
+  assistant_message: string;
+  actions: AgentActionResult[];
+  tool_calls_count?: number;
+  dry_run?: boolean;
+};
+
 export type DemoScenario = {
   id: string;
   label: string;
@@ -260,5 +283,17 @@ export async function planTaskRoadmap(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, timezone: userTimezone, horizon_days: horizonDays }),
+  });
+}
+
+export async function runAgentCommand(
+  query: string,
+  dryRun = true,
+): Promise<AgentCommandResponse> {
+  const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  return request<AgentCommandResponse>("/ai/agent-command", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, timezone: userTimezone, dry_run: dryRun }),
   });
 }
