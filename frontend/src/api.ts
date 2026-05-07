@@ -341,6 +341,26 @@ export async function recordNextActionOutcome(
   );
 }
 
+export async function applyNextAction(
+  feedbackKey: string,
+): Promise<{
+  ok: boolean;
+  action_type: string;
+  feedback_key: string;
+  task: { id: number; title: string; status: TaskStatus; due_date: string | null };
+}> {
+  return request<{
+    ok: boolean;
+    action_type: string;
+    feedback_key: string;
+    task: { id: number; title: string; status: TaskStatus; due_date: string | null };
+  }>("/insights/next-actions/apply", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ feedback_key: feedbackKey }),
+  });
+}
+
 export type ActionOutcomeBreakdown = {
   total: number;
   accepted: number;

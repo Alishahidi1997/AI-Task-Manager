@@ -14,6 +14,7 @@ import {
   getInsightAnomalies,
   getNextActions,
   recordNextActionOutcome,
+  applyNextAction,
   getNextActionOutcomes,
   getAnalyticsPlayback,
   listDemoScenarios,
@@ -183,6 +184,7 @@ function App() {
   const [nextActions, setNextActions] = useState<NextActionsResponse | null>(null);
   const [actionOutcomes, setActionOutcomes] = useState<ActionOutcomesResponse | null>(null);
   const [updatingNextActionKey, setUpdatingNextActionKey] = useState<string | null>(null);
+  const [applyingNextActionKey, setApplyingNextActionKey] = useState<string | null>(null);
   const [personaRole, setPersonaRole] = useState<PersonaRole>("manager");
   const [personaDash, setPersonaDash] = useState<PersonaDashboardResponse | null>(null);
   const [personaLoading, setPersonaLoading] = useState(false);
@@ -576,6 +578,21 @@ function App() {
       setError(err instanceof Error ? err.message : "Could not update next-action outcome");
     } finally {
       setUpdatingNextActionKey(null);
+    }
+  }
+
+  async function handleApplyNextAction(feedbackKey: string) {
+    setApplyingNextActionKey(feedbackKey);
+    setError("");
+    try {
+      await applyNextAction(feedbackKey);
+      await loadTasks();
+      await loadInsights();
+      await loadPlayback(playbackPresetDays);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not apply next action");
+    } finally {
+      setApplyingNextActionKey(null);
     }
   }
 
@@ -1019,22 +1036,38 @@ function App() {
                         <div className="task-actions">
                           <button
                             type="button"
+                            onClick={() => void handleApplyNextAction(item.feedback_key)}
+                            disabled={applyingNextActionKey === item.feedback_key}
+                          >
+                            {applyingNextActionKey === item.feedback_key ? "applying..." : "apply now"}
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => void handleNextActionOutcome(item.feedback_key, "accepted")}
-                            disabled={updatingNextActionKey === item.feedback_key}
+                            disabled={
+                              updatingNextActionKey === item.feedback_key ||
+                              applyingNextActionKey === item.feedback_key
+                            }
                           >
                             accepted
                           </button>
                           <button
                             type="button"
                             onClick={() => void handleNextActionOutcome(item.feedback_key, "dismissed")}
-                            disabled={updatingNextActionKey === item.feedback_key}
+                            disabled={
+                              updatingNextActionKey === item.feedback_key ||
+                              applyingNextActionKey === item.feedback_key
+                            }
                           >
                             dismissed
                           </button>
                           <button
                             type="button"
                             onClick={() => void handleNextActionOutcome(item.feedback_key, "completed")}
-                            disabled={updatingNextActionKey === item.feedback_key}
+                            disabled={
+                              updatingNextActionKey === item.feedback_key ||
+                              applyingNextActionKey === item.feedback_key
+                            }
                           >
                             completed
                           </button>

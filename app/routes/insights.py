@@ -27,6 +27,50 @@ class NextActionOutcomeIn(BaseModel):
     outcome: str
 
 
+class NextActionApplyIn(BaseModel):
+    feedback_key: str
+
+
+def _parse_feedback_key(feedback_key: str) -> tuple[str, int]:
+    raw = feedback_key.strip()
+    if ":" not in raw:
+        raise HTTPException(status_code=400, detail="feedback_key must include action_type:task_id")
+    action_type, task_id_text = raw.split(":", 1)
+    action_type = action_type.strip()
+    if not action_type:
+        raise HTTPException(status_code=400, detail="feedback_key missing action_type")
+    try:
+        task_id = int(task_id_text.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="feedback_key task_id must be an integer") from exc
+    return action_type, task_id
+
+
+def _apply_next_action(action_type: str, task: Task):
+    now = datetime.now(timezone.utc)
+    if action_type == "reschedule":
+        base = task.due_date or now
+        task.due_date = base + timedelta(days=2)
+    elif action_type == "split_task":
+        note = "Split suggestion: break this item into smaller deliverables with concrete subtask owners."
+        task.description = f"{(task.description or '').strip()}\n\n{note}".strip()
+        if task.status == "todo":
+            task.status = "in_progress"
+    elif action_type == "escalate_risk":
+        if not task.title.startswith("[ESCALATED] "):
+            task.title = f"[ESCALATED] {task.title}"
+        task.status = "in_progress"
+        note = "Risk escalated due to prolonged overdue duration."
+        task.description = f"{(task.description or '').strip()}\n\n{note}".strip()
+    elif action_type == "contact_owner":
+        note = "Action taken: owner contacted to confirm recovery ETA."
+        task.description = f"{(task.description or '').strip()}\n\n{note}".strip()
+        if task.status == "todo":
+            task.status = "in_progress"
+    else:
+        raise HTTPException(status_code=400, detail=f"unsupported action_type '{action_type}'")
+
+
 @router.get("/productivity")
 def productivity_insights(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     done = (
@@ -107,11 +151,7 @@ def record_next_action_outcome(
             detail="outcome must be one of: accepted, dismissed, completed",
         )
     feedback_key = payload.feedback_key.strip()
-    if ":" not in feedback_key:
-        raise HTTPException(status_code=400, detail="feedback_key must include action_type:task_id")
-    action_type = feedback_key.split(":", 1)[0].strip()
-    if not action_type:
-        raise HTTPException(status_code=400, detail="feedback_key missing action_type")
+    action_type, _ = _parse_feedback_key(feedback_key)
 
     row = NextActionFeedback(
         user_id=current_user.id,
@@ -122,6 +162,44 @@ def record_next_action_outcome(
     db.add(row)
     db.commit()
     return {"ok": True, "feedback_id": row.id, "feedback_key": feedback_key, "outcome": outcome}
+
+
+@router.post("/next-actions/apply")
+def apply_next_action(
+    payload: NextActionApplyIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    feedback_key = payload.feedback_key.strip()
+    action_type, task_id = _parse_feedback_key(feedback_key)
+    task = db.query(Task).filter(Task.id == task_id, Task.user_id == current_user.id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="task not found")
+    if task.status == "done":
+        raise HTTPException(status_code=400, detail="cannot apply next action to a done task")
+
+    _apply_next_action(action_type, task)
+    db.add(task)
+    row = NextActionFeedback(
+        user_id=current_user.id,
+        feedback_key=feedback_key,
+        action_type=action_type,
+        outcome="completed",
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(task)
+    return {
+        "ok": True,
+        "action_type": action_type,
+        "feedback_key": feedback_key,
+        "task": {
+            "id": task.id,
+            "title": task.title,
+            "status": task.status,
+            "due_date": task.due_date.isoformat() if task.due_date else None,
+        },
+    }
 
 
 @router.get("/next-actions/outcomes")
