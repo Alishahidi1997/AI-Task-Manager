@@ -9,8 +9,10 @@ from app.models import Task, User
 from app.routes.ai import router as ai_router
 from app.routes.analytics import router as analytics_router
 from app.routes.auth import router as auth_router
+from app.routes.chat import router as chat_router
 from app.routes.demo import router as demo_router
 from app.routes.insights import router as insights_router
+from app.routes.slack import router as slack_router
 from app.routes.summary import router as summary_router
 from app.routes.tasks import router as tasks_router
 from app.services.category_guess import guess_category
@@ -76,6 +78,8 @@ app.include_router(auth_router)
 app.include_router(demo_router)
 app.include_router(ai_router)
 app.include_router(analytics_router)
+app.include_router(chat_router)
+app.include_router(slack_router)
 
 
 @app.get("/")

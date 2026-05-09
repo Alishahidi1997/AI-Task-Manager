@@ -29,11 +29,24 @@ def migrate_sqlite(engine):
             text(
                 "CREATE TABLE IF NOT EXISTS users ("
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "slack_user_id VARCHAR(64), "
                 "email VARCHAR(255) NOT NULL UNIQUE, "
                 "password_hash VARCHAR(255) NOT NULL, "
+                "role VARCHAR(64) NOT NULL DEFAULT 'employee', "
+                "tenant_id VARCHAR(128) NOT NULL DEFAULT 'default', "
                 "created_at DATETIME NOT NULL)"
             )
         )
+        user_rows = conn.execute(text("PRAGMA table_info(users)")).fetchall()
+        user_cols = {r[1] for r in user_rows}
+        if "slack_user_id" not in user_cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN slack_user_id VARCHAR(64)"))
+        if "role" not in user_cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN role VARCHAR(64)"))
+            conn.execute(text("UPDATE users SET role = 'employee' WHERE role IS NULL OR role = ''"))
+        if "tenant_id" not in user_cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN tenant_id VARCHAR(128)"))
+            conn.execute(text("UPDATE users SET tenant_id = 'default' WHERE tenant_id IS NULL OR tenant_id = ''"))
 
         rows = conn.execute(text("PRAGMA table_info(tasks)")).fetchall()
         col_names = {r[1] for r in rows}
@@ -67,6 +80,21 @@ def migrate_sqlite(engine):
                 "feedback_key VARCHAR(255) NOT NULL, "
                 "action_type VARCHAR(64) NOT NULL, "
                 "outcome VARCHAR(32) NOT NULL, "
+                "created_at DATETIME NOT NULL)"
+            )
+        )
+
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS audit_logs ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "request_text TEXT NOT NULL, "
+                "tool_name VARCHAR(64), "
+                "arguments TEXT, "
+                "validation_result VARCHAR(32) NOT NULL, "
+                "execution_result VARCHAR(32) NOT NULL, "
+                "user_id INTEGER NOT NULL, "
+                "tenant_id VARCHAR(128) NOT NULL, "
                 "created_at DATETIME NOT NULL)"
             )
         )

@@ -1,67 +1,62 @@
-# Smart Task Tracker
+# Smart Task Tracker - AI Middleware Backend
 
-I wanted to build something that feels closer to a real product than a tutorial app.
-So this project is a task tracker with auth, insights, and AI features that are actually useful in day-to-day planning.
+Backend-first orchestration platform where an LLM plans actions and the server enforces validation, authorization, execution, and audit logging.
 
-You can:
-- create/update/delete tasks
-- track status (`todo`, `in_progress`, `done`)
-- filter by due dates
-- get AI daily summaries
-- see overdue priority suggestions
-- generate a weekly retro
+Source of truth for architecture and roadmap: `project.md`.
 
-It also has JWT login and user-level data isolation, so each user only sees their own data.
+## What this backend does
 
-## Stack
+- JWT-authenticated task operations
+- Natural-language orchestration endpoint (`POST /chat`)
+- Strict planner output validation before execution
+- Policy/authorization checks before tool execution
+- Audit log persistence for orchestration requests
+- Insights endpoints (priority, productivity, anomalies, next actions, outcomes)
+- Background daily summary scheduler
 
-- Backend: FastAPI + SQLAlchemy + SQLite
-- Frontend: React + TypeScript (Vite)
-- AI: OpenAI API
+This repository intentionally supports channel integrations (Slack/email/API clients). A frontend is out of scope for the roadmap.
 
-## Run it locally
+## Stack (current)
 
-### Backend (terminal 1)
+- FastAPI + SQLAlchemy
+- SQLite (current local DB), designed to migrate toward PostgreSQL
+- OpenAI API (planner + AI routes)
+
+## Run locally
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 set DEMO_MODE=true
+set OPENAI_API_KEY=your_key_here
+set OPENAI_MODEL=gpt-4o-mini
 uvicorn app.main:app --reload
 ```
 
-Backend will be at:
+API:
+
 - `http://127.0.0.1:8000`
-- docs: `http://127.0.0.1:8000/docs`
+- Swagger docs: `http://127.0.0.1:8000/docs`
 
-If you want real AI summary output:
+## Core orchestration endpoints
 
-```bash
-set OPENAI_API_KEY=your_key_here
-set OPENAI_MODEL=gpt-4o-mini
-```
+- `POST /chat` - natural-language request -> planner -> validator -> authz -> execution
+- `POST /clarify` - clarification loop response intake
+- `GET /audit/{id}` - fetch orchestration audit record
 
-### Frontend (terminal 2)
+Supporting domain endpoints remain available under:
 
-```bash
-cd frontend
-npm install
-copy .env.example .env
-npm run dev
-```
+- `/tasks`
+- `/summary`
+- `/insights`
+- `/analytics`
+- `/demo`
+- `/ai`
 
-Open `http://localhost:5173`
-
-## Demo account
-
-Use this to try everything quickly:
+## Demo account (optional)
 
 - email: `demo@smarttracker.local`
 - password: `demo1234`
 
-When `DEMO_MODE=true` is enabled on backend, this account also gets a **Reset demo data** button.
-
-## Quick note
-
-This project is intentionally simple in setup (SQLite, single repo), but the structure is ready to scale to Postgres/deployment later.
+`DEMO_MODE=true` enables demo-only flows.
