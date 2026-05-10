@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -7,15 +8,41 @@ import httpx
 from app.database import get_db
 from app.deps import get_http_client
 from app.llm.openai_client import plan_tool_call_async
-from app.models import User
+from app.models import AuditLog, User
 from app.orchestration.prompt_builder import build_planner_system_prompt
 from app.orchestration.tool_registry import filter_tools, tool_schema_map
 from app.services.rbac import allowed_tools_for_role
+from app.services.slack_execution import execute_slack_tool
 from app.services.slack_security import verify_slack_signature
 from app.validation.json_validator import validate_planner_output
 from app.validation.policy_engine import enforce_policies
 
 router = APIRouter(prefix="/slack", tags=["slack"])
+
+
+def _audit_row(
+    db: Session,
+    *,
+    request_text: str,
+    user: User,
+    tool_name: str | None,
+    arguments: dict | None,
+    validation_result: str,
+    execution_result: str,
+) -> AuditLog:
+    row = AuditLog(
+        request_text=request_text,
+        tool_name=tool_name,
+        arguments=json.dumps(arguments, ensure_ascii=True) if arguments is not None else None,
+        validation_result=validation_result,
+        execution_result=execution_result,
+        user_id=user.id,
+        tenant_id=user.tenant_id or "default",
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 @router.post("/events")
@@ -73,6 +100,15 @@ async def slack_events(
             allowed_tools=allowed,
         )
         if validated_plan.missing_required or validated_plan.confidence < 0.35:
+            row = _audit_row(
+                db,
+                request_text=text,
+                user=user,
+                tool_name=validated_plan.tool,
+                arguments=validated_plan.arguments,
+                validation_result="clarification",
+                execution_result="clarification_required",
+            )
             return {
                 "ok": True,
                 "normalized_request": normalized,
@@ -82,18 +118,97 @@ async def slack_events(
                 "clarification_question": validated_plan.clarification_question
                 or f"Missing required: {', '.join(validated_plan.missing_required)}",
                 "planner_output": validated_plan.model_dump(),
+                "audit_id": row.id,
             }
         enforce_policies(identity_context, validated_plan.tool, validated_plan.arguments)
     except PermissionError as exc:
+        row = _audit_row(
+            db,
+            request_text=text,
+            user=user,
+            tool_name=None,
+            arguments=None,
+            validation_result="failed",
+            execution_result="policy_rejected",
+        )
         return {
             "ok": False,
             "normalized_request": normalized,
             "identity_context": identity_context,
             "status": "policy_rejected",
             "reason": str(exc),
+            "audit_id": row.id,
         }
     except Exception as exc:
+        try:
+            _audit_row(
+                db,
+                request_text=text,
+                user=user,
+                tool_name=None,
+                arguments=None,
+                validation_result="failed",
+                execution_result="failed",
+            )
+        except Exception:
+            db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        exec_result = execute_slack_tool(
+            tool=validated_plan.tool,
+            arguments=validated_plan.arguments,
+            user=user,
+            db=db,
+        )
+    except PermissionError as exc:
+        row = _audit_row(
+            db,
+            request_text=text,
+            user=user,
+            tool_name=validated_plan.tool,
+            arguments=validated_plan.arguments,
+            validation_result="passed",
+            execution_result="denied",
+        )
+        return {
+            "ok": False,
+            "normalized_request": normalized,
+            "identity_context": identity_context,
+            "status": "execution_denied",
+            "reason": str(exc),
+            "planner_output": validated_plan.model_dump(),
+            "audit_id": row.id,
+        }
+    except ValueError as exc:
+        row = _audit_row(
+            db,
+            request_text=text,
+            user=user,
+            tool_name=validated_plan.tool,
+            arguments=validated_plan.arguments,
+            validation_result="passed",
+            execution_result="failed",
+        )
+        return {
+            "ok": False,
+            "normalized_request": normalized,
+            "identity_context": identity_context,
+            "status": "execution_failed",
+            "reason": str(exc),
+            "planner_output": validated_plan.model_dump(),
+            "audit_id": row.id,
+        }
+
+    row = _audit_row(
+        db,
+        request_text=text,
+        user=user,
+        tool_name=validated_plan.tool,
+        arguments=validated_plan.arguments,
+        validation_result="passed",
+        execution_result="executed",
+    )
 
     return {
         "ok": True,
@@ -102,5 +217,7 @@ async def slack_events(
         "allowed_tools": tools,
         "planner_prompt": planner_prompt,
         "planner_output": validated_plan.model_dump(),
-        "status": "layer_4_to_6_complete",
+        "status": "executed",
+        "execution": exec_result,
+        "audit_id": row.id,
     }

@@ -173,6 +173,14 @@ Requires:
 
 Protected routes that use OpenAI when configured (see route implementations and `app/services/*`). Typical uses: natural language task parse, roadmap planning, agent-style commands with tool calls. The frontend exposes these in the composer and “AI Command Console”.
 
+### Slack (`/slack`)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/slack/events` | Slack Events API: verifies Slack signing secret (unless dev bypass env), normalizes event, maps Slack user → internal user, planner → structured validation → policy → **trusted execution** (`app/services/slack_execution.py`) → `audit_logs` row. Returns JSON including `status`: `executed`, `clarification_required`, `policy_rejected`, `execution_failed`, etc., and `audit_id` when an audit row was written. |
+
+Execution respects tenant isolation by scoping task queries to `user_id`. Assignee on tasks is persisted via `description` lines (`Assignee: …`) because the MVP task schema does not include a dedicated assignee column.
+
 ---
 
 ## 7. Category (“smart grouping”) workflow

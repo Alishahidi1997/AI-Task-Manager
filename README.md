@@ -34,6 +34,40 @@ set OPENAI_MODEL=gpt-4o-mini
 uvicorn app.main:app --reload
 ```
 
+### Slack `/slack/events` (optional)
+
+For production-like requests you must set **`SLACK_SIGNING_SECRET`** and send valid `X-Slack-Request-Timestamp` / `X-Slack-Signature` headers (see Slack Events API docs).
+
+For **local smoke tests only**, you can disable signature verification:
+
+```bash
+set SLACK_SKIP_SIGNATURE_VERIFY=true
+```
+
+Never enable **`SLACK_SKIP_SIGNATURE_VERIFY`** in production.
+
+Ensure the Slack user exists on `users.slack_user_id` for your test payloads (map a Slack member ID to an internal user in the DB). Requires **`OPENAI_API_KEY`** for the planner step.
+
+Example URL verification (no signature headers needed when skip is on):
+
+**PowerShell** — `curl` is an alias for `Invoke-WebRequest`, so use **`Invoke-RestMethod`** or **`curl.exe`** (real curl):
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/slack/events" -Method POST -ContentType "application/json" -Body '{"type":"url_verification","challenge":"hello"}'
+```
+
+```powershell
+curl.exe -s -X POST http://127.0.0.1:8000/slack/events -H "Content-Type: application/json" -d "{\"type\":\"url_verification\",\"challenge\":\"hello\"}"
+```
+
+**Git Bash / WSL / macOS / Linux:**
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/slack/events -H "Content-Type: application/json" -d '{"type":"url_verification","challenge":"hello"}'
+```
+
+Optional: **`REDIS_URL`** enables Redis on app startup (request counters on `/chat` when configured).
+
 API:
 
 - `http://127.0.0.1:8000`
