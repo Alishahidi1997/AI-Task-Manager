@@ -1,9 +1,9 @@
 import json
 from datetime import datetime
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-import httpx
 
 from app.auth import get_current_user
 from app.database import get_db
@@ -13,6 +13,7 @@ from app.models import AuditLog, SlackOrchestrationTrace, User
 from app.orchestration.prompt_builder import build_planner_system_prompt
 from app.orchestration.tool_registry import filter_tools, tool_schema_map
 from app.services.rbac import allowed_tools_for_role
+from app.services.slack_bot_client import chat_post_message, slack_bot_token
 from app.services.slack_execution import execute_slack_tool
 from app.services.slack_observability import (
     SlackTraceRecorder,
@@ -24,6 +25,44 @@ from app.validation.json_validator import validate_planner_output
 from app.validation.policy_engine import enforce_policies
 
 router = APIRouter(prefix="/slack", tags=["slack"])
+
+
+def _slack_thread_ts_for_reply(event: dict) -> str | None:
+    """Thread to post under: same thread if user was in a thread, else start a thread on their message."""
+    ts = event.get("ts")
+    if ts is None:
+        return None
+    root = event.get("thread_ts")
+    return str(root) if root else str(ts)
+
+
+async def _post_slack_user_message(
+    http_client: httpx.AsyncClient,
+    recorder: SlackTraceRecorder,
+    *,
+    channel_id: str,
+    event: dict,
+    text: str,
+) -> dict | None:
+    token = slack_bot_token()
+    if not token:
+        return None
+    thread_ts = _slack_thread_ts_for_reply(event)
+    with recorder.span("slack_post_message"):
+        try:
+            return await chat_post_message(
+                http_client,
+                token=token,
+                channel=channel_id,
+                text=text[:4000],
+                thread_ts=thread_ts,
+            )
+        except httpx.HTTPError as exc:
+            return {
+                "ok": False,
+                "error": f"http_{type(exc).__name__}",
+                "detail": str(exc)[:500],
+            }
 
 
 def _audit_row(
@@ -77,6 +116,9 @@ async def slack_events(
     event = payload.get("event") or {}
     if event.get("type") != "message":
         return {"ok": True, "ignored": True}
+
+    if event.get("subtype") is not None:
+        return {"ok": True, "ignored": True, "reason": "skipped_non_plain_message"}
 
     slack_user_id = event.get("user")
     text = event.get("text")
@@ -152,6 +194,16 @@ async def slack_events(
                 allowed_tools=allowed,
             )
         if validated_plan.missing_required or validated_plan.confidence < 0.35:
+            clarify_q = validated_plan.clarification_question or (
+                f"Missing required: {', '.join(validated_plan.missing_required)}"
+            )
+            slack_delivery = await _post_slack_user_message(
+                http_client,
+                recorder,
+                channel_id=channel_id,
+                event=event,
+                text=f"I need a bit more detail:\n{clarify_q}",
+            )
             row = _audit_row(
                 db,
                 request_text=text,
@@ -172,21 +224,30 @@ async def slack_events(
                 outcome="clarification_required",
                 audit_log_id=row.id,
             )
-            return {
+            body = {
                 "ok": True,
                 "normalized_request": normalized,
                 "identity_context": identity_context,
                 "allowed_tools": tools,
                 "status": "clarification_required",
-                "clarification_question": validated_plan.clarification_question
-                or f"Missing required: {', '.join(validated_plan.missing_required)}",
+                "clarification_question": clarify_q,
                 "planner_output": validated_plan.model_dump(),
                 "audit_id": row.id,
                 "trace": trace_response_summary(recorder),
             }
+            if slack_delivery is not None:
+                body["slack_delivery"] = slack_delivery
+            return body
         with recorder.span("policy"):
             enforce_policies(identity_context, validated_plan.tool, validated_plan.arguments)
     except PermissionError as exc:
+        slack_delivery = await _post_slack_user_message(
+            http_client,
+            recorder,
+            channel_id=channel_id,
+            event=event,
+            text=f"I can't run that (policy): {str(exc)[:3500]}",
+        )
         row = _audit_row(
             db,
             request_text=text,
@@ -207,7 +268,7 @@ async def slack_events(
             outcome="policy_rejected",
             audit_log_id=row.id,
         )
-        return {
+        body = {
             "ok": False,
             "normalized_request": normalized,
             "identity_context": identity_context,
@@ -216,6 +277,9 @@ async def slack_events(
             "audit_id": row.id,
             "trace": trace_response_summary(recorder),
         }
+        if slack_delivery is not None:
+            body["slack_delivery"] = slack_delivery
+        return body
     except Exception as exc:
         try:
             row = _audit_row(
@@ -257,6 +321,13 @@ async def slack_events(
                 db=db,
             )
     except PermissionError as exc:
+        slack_delivery = await _post_slack_user_message(
+            http_client,
+            recorder,
+            channel_id=channel_id,
+            event=event,
+            text=f"I can't complete that (permission): {str(exc)[:3500]}",
+        )
         row = _audit_row(
             db,
             request_text=text,
@@ -277,7 +348,7 @@ async def slack_events(
             outcome="execution_denied",
             audit_log_id=row.id,
         )
-        return {
+        body = {
             "ok": False,
             "normalized_request": normalized,
             "identity_context": identity_context,
@@ -287,7 +358,17 @@ async def slack_events(
             "audit_id": row.id,
             "trace": trace_response_summary(recorder),
         }
+        if slack_delivery is not None:
+            body["slack_delivery"] = slack_delivery
+        return body
     except ValueError as exc:
+        slack_delivery = await _post_slack_user_message(
+            http_client,
+            recorder,
+            channel_id=channel_id,
+            event=event,
+            text=f"I couldn't complete that: {str(exc)[:3500]}",
+        )
         row = _audit_row(
             db,
             request_text=text,
@@ -308,7 +389,7 @@ async def slack_events(
             outcome="execution_failed",
             audit_log_id=row.id,
         )
-        return {
+        body = {
             "ok": False,
             "normalized_request": normalized,
             "identity_context": identity_context,
@@ -318,6 +399,23 @@ async def slack_events(
             "audit_id": row.id,
             "trace": trace_response_summary(recorder),
         }
+        if slack_delivery is not None:
+            body["slack_delivery"] = slack_delivery
+        return body
+
+    tool = validated_plan.tool
+    tid = exec_result.get("task_id")
+    st = exec_result.get("status")
+    success_bits = [f"Done — executed `{tool}`."]
+    if tid is not None:
+        success_bits.append(f"Task #{tid} (status: `{st}`).")
+    slack_delivery = await _post_slack_user_message(
+        http_client,
+        recorder,
+        channel_id=channel_id,
+        event=event,
+        text=" ".join(success_bits),
+    )
 
     row = _audit_row(
         db,
@@ -340,7 +438,7 @@ async def slack_events(
         audit_log_id=row.id,
     )
 
-    return {
+    body = {
         "ok": True,
         "normalized_request": normalized,
         "identity_context": identity_context,
@@ -352,6 +450,9 @@ async def slack_events(
         "audit_id": row.id,
         "trace": trace_response_summary(recorder),
     }
+    if slack_delivery is not None:
+        body["slack_delivery"] = slack_delivery
+    return body
 
 
 @router.get("/traces/{trace_id}")

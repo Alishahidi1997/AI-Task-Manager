@@ -48,6 +48,8 @@ Never enable **`SLACK_SKIP_SIGNATURE_VERIFY`** in production.
 
 Ensure the Slack user exists on `users.slack_user_id` for your test payloads (map a Slack member ID to an internal user in the DB). Requires **`OPENAI_API_KEY`** for the planner step.
 
+To **post bot replies** in the channel (or thread) after orchestration, set **`SLACK_BOT_TOKEN`** to the Bot User OAuth Token (`xoxb-...`) with the `chat:write` scope (and install the app to the workspace). Without it, `/slack/events` still runs and returns JSON, but nothing is posted to Slack.
+
 Example URL verification (no signature headers needed when skip is on):
 
 **PowerShell** — `curl` is an alias for `Invoke-WebRequest`, so use **`Invoke-RestMethod`** or **`curl.exe`** (real curl):
