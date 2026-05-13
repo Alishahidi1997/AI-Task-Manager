@@ -50,6 +50,8 @@ Ensure the Slack user exists on `users.slack_user_id` for your test payloads (ma
 
 To **post bot replies** in the channel (or thread) after orchestration, set **`SLACK_BOT_TOKEN`** to the Bot User OAuth Token (`xoxb-...`) with the `chat:write` scope (and install the app to the workspace). Without it, `/slack/events` still runs and returns JSON, but nothing is posted to Slack.
 
+For **real Slack event subscriptions**, keep **`SLACK_EVENTS_ASYNC=true`** (default) so the server responds within Slack’s window while planner/execution runs afterward. For **local debugging** of the full orchestration JSON in the same HTTP response, set `SLACK_EVENTS_ASYNC=false`.
+
 Example URL verification (no signature headers needed when skip is on):
 
 **PowerShell** — `curl` is an alias for `Invoke-WebRequest`, so use **`Invoke-RestMethod`** or **`curl.exe`** (real curl):

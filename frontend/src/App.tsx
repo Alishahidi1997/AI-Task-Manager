@@ -555,11 +555,14 @@ function App() {
     }
   }
 
-  async function handleExplainInsight(insightId: string) {
+  async function handleExplainInsight(
+    insightId: string,
+    query?: { days?: number; baseline_days?: number },
+  ) {
     setExplainingInsightId(insightId);
     setError("");
     try {
-      const data = await getInsightExplanation(insightId);
+      const data = await getInsightExplanation(insightId, query);
       setInsightExplanations((prev) => ({ ...prev, [insightId]: data }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load insight explanation");
@@ -988,6 +991,32 @@ function App() {
               {anomalies?.baseline_days ?? 7}-day rolling baseline (last {anomalies?.window_days ?? 30}{" "}
               days). Sorted by impact.
             </p>
+            <div className="task-actions">
+              <button
+                type="button"
+                onClick={() =>
+                  void handleExplainInsight("anomalies", {
+                    days: anomalies?.window_days ?? 30,
+                    baseline_days: anomalies?.baseline_days ?? 7,
+                  })
+                }
+                disabled={explainingInsightId === "anomalies"}
+              >
+                {explainingInsightId === "anomalies" ? "Loading why..." : "Why this insight?"}
+              </button>
+            </div>
+            {insightExplanations.anomalies ? (
+              <div className="insight-block">
+                <p>
+                  <strong>{insightExplanations.anomalies.title}</strong>
+                </p>
+                <ul className="simple-list">
+                  {insightExplanations.anomalies.why.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {anomalies && anomalies.anomalies.length > 0 ? (
               <ul className="simple-list">
                 {anomalies.anomalies.map((item) => (

@@ -1,6 +1,8 @@
 # productivity numbers from done tasks (needs completed_at filled when they hit done)
 from datetime import datetime, timedelta, timezone
 
+from app.services.analytics import detect_kpi_anomalies
+
 
 def _bucket_for_task(task, guess_fn):
     if getattr(task, "category", None):
@@ -272,6 +274,50 @@ def build_insight_explanation(insight_id, done_tasks, pending_tasks, guess_fn):
         }
 
     return None
+
+
+def build_anomalies_explanation(tasks, window_days: int, baseline_days: int):
+    """User-facing 'why' for KPI anomaly detection (same detector as GET /insights/anomalies)."""
+    now = datetime.now(timezone.utc)
+    data = detect_kpi_anomalies(tasks, window_days=window_days, baseline_days=baseline_days)
+    snaps = int(data.get("snapshots_used") or 0)
+    w = int(data.get("window_days") or window_days)
+    b = int(data.get("baseline_days") or baseline_days)
+    why = [
+        f"Anomalies use the last {w} calendar days of daily KPI snapshots built from your tasks.",
+        (
+            f"Each day is compared to the prior {b}-day rolling baseline using z-scores; "
+            "a day flags when |z| >= 2.0 and the move is material for that metric."
+        ),
+        "Metrics are completions that day, open overdue count at end of day, and average "
+        "create-to-done hours for tasks completed that day (when enough signal exists).",
+    ]
+    if snaps < b + 1:
+        why.append(
+            f"Only {snaps} snapshot day(s) are usable right now; need at least {b + 1} days "
+            "spanning the window to compare each day against a full baseline."
+        )
+    flagged = data.get("anomalies") or []
+    top = flagged[:3]
+    if top:
+        why.append("Strongest current flags by impact:")
+        for row in top:
+            day = str(row.get("date", ""))[:10]
+            why.append(
+                f"- {row.get('metric')} {row.get('direction')} on {day} "
+                f"(z={row.get('z_score')}, confidence {row.get('confidence')}, impact {row.get('impact')})."
+            )
+    else:
+        why.append(
+            "No day in this window exceeded the threshold—either steady day-to-day patterns "
+            "or not enough variance yet for a confident flag."
+        )
+    return {
+        "insight_id": "anomalies",
+        "title": "How KPI anomaly detection works",
+        "why": why,
+        "generated_at": data.get("generated_at") or now.isoformat(),
+    }
 
 
 def _next_action_type(task, hours_overdue: float):

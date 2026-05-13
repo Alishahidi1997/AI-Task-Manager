@@ -11,6 +11,7 @@ from app.services.action_outcomes import build_next_action_outcomes_dashboard
 from app.services.analytics import detect_kpi_anomalies
 from app.services.category_guess import guess_category
 from app.services.insights import (
+    build_anomalies_explanation,
     build_insight_explanation,
     build_next_actions,
     build_priority_suggestions,
@@ -226,9 +227,27 @@ def next_action_outcomes(
 @router.get("/explain/{insight_id}")
 def explain_insight(
     insight_id: str,
+    days: int = Query(default=30, ge=8, le=120),
+    baseline_days: int = Query(default=7, ge=3, le=21),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    key = insight_id.strip().lower()
+    if key == "anomalies":
+        if baseline_days >= days:
+            raise HTTPException(
+                status_code=400,
+                detail="baseline_days must be smaller than days so each day has a prior window",
+            )
+        tasks = (
+            db.query(Task)
+            .filter(Task.user_id == current_user.id)
+            .order_by(Task.created_at.asc(), Task.id.asc())
+            .limit(3000)
+            .all()
+        )
+        return build_anomalies_explanation(tasks, window_days=days, baseline_days=baseline_days)
+
     done = (
         db.query(Task)
         .filter(Task.status == "done", Task.user_id == current_user.id)

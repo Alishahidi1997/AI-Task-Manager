@@ -1,12 +1,13 @@
 import json
+import os
 from datetime import datetime
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.deps import get_http_client
 from app.llm.openai_client import plan_tool_call_async
 from app.models import AuditLog, SlackOrchestrationTrace, User
@@ -90,83 +91,65 @@ def _audit_row(
     return row
 
 
-@router.post("/events")
-async def slack_events(
-    request: Request,
-    db: Session = Depends(get_db),
-    http_client: httpx.AsyncClient = Depends(get_http_client),
-):
-    raw = await request.body()
-    recorder = SlackTraceRecorder()
+def _slack_events_async_enabled() -> bool:
+    """When true (default), acknowledge Slack quickly and run orchestration in a background task."""
+    val = os.getenv("SLACK_EVENTS_ASYNC", "true").strip().lower()
+    return val not in {"0", "false", "no", "off"}
+
+
+async def _slack_orchestration_background(
+    http_client: httpx.AsyncClient,
+    recorder: SlackTraceRecorder,
+    user_id: int,
+    event: dict,
+    slack_user_id: str,
+    text: str,
+    channel_id: str,
+    ts,
+) -> None:
+    db = SessionLocal()
     try:
-        with recorder.span("signature_verify"):
-            verify_slack_signature(
-                timestamp=request.headers.get("X-Slack-Request-Timestamp"),
-                signature=request.headers.get("X-Slack-Signature"),
-                raw_body=raw,
+        user = db.get(User, user_id)
+        if user is None:
+            return
+        try:
+            await _orchestrate_slack_message_after_user_map(
+                http_client,
+                recorder,
+                db,
+                user,
+                event=event,
+                slack_user_id=slack_user_id,
+                text=text,
+                channel_id=channel_id,
+                ts=ts,
             )
-        with recorder.span("parse_payload"):
-            payload = json.loads(raw.decode("utf-8"))
-    except HTTPException:
-        raise
+        except HTTPException as exc:
+            raw = exc.detail
+            msg = raw.get("detail", str(raw)) if isinstance(raw, dict) else str(raw)
+            await _post_slack_user_message(
+                http_client,
+                recorder,
+                channel_id=channel_id,
+                event=event,
+                text=f"I couldn't process that request: {msg[:3500]}",
+            )
+    finally:
+        db.close()
 
-    if payload.get("type") == "url_verification":
-        return {"challenge": payload.get("challenge")}
 
-    event = payload.get("event") or {}
-    if event.get("type") != "message":
-        return {"ok": True, "ignored": True}
-
-    if event.get("subtype") is not None:
-        return {"ok": True, "ignored": True, "reason": "skipped_non_plain_message"}
-
-    slack_user_id = event.get("user")
-    text = event.get("text")
-    channel_id = event.get("channel")
-    ts = event.get("ts")
-    tenant_fallback = "default"
-
-    if not slack_user_id or not text or not channel_id:
-        persist_slack_trace(
-            db,
-            recorder,
-            user=None,
-            tenant_id=tenant_fallback,
-            slack_channel_id=channel_id,
-            slack_message_ts=str(ts) if ts is not None else None,
-            slack_user_id=slack_user_id,
-            outcome="malformed_event",
-        )
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "detail": "malformed slack event payload",
-                "trace_id": recorder.trace_id,
-            },
-        )
-
-    with recorder.span("user_resolve"):
-        user = db.query(User).filter(User.slack_user_id == slack_user_id).first()
-
-    if not user:
-        persist_slack_trace(
-            db,
-            recorder,
-            user=None,
-            tenant_id=tenant_fallback,
-            slack_channel_id=channel_id,
-            slack_message_ts=str(ts) if ts is not None else None,
-            slack_user_id=slack_user_id,
-            outcome="user_not_mapped",
-        )
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "detail": "slack user is not mapped to an internal user",
-                "trace_id": recorder.trace_id,
-            },
-        )
-
+async def _orchestrate_slack_message_after_user_map(
+    http_client: httpx.AsyncClient,
+    recorder: SlackTraceRecorder,
+    db: Session,
+    user: User,
+    *,
+    event: dict,
+    slack_user_id: str,
+    text: str,
+    channel_id: str,
+    ts,
+) -> dict:
     tenant_id = user.tenant_id or "default"
     allowed = allowed_tools_for_role(user.role)
     tools = filter_tools(allowed)
@@ -453,6 +436,111 @@ async def slack_events(
     if slack_delivery is not None:
         body["slack_delivery"] = slack_delivery
     return body
+
+
+@router.post("/events")
+async def slack_events(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    http_client: httpx.AsyncClient = Depends(get_http_client),
+):
+    raw = await request.body()
+    recorder = SlackTraceRecorder()
+    try:
+        with recorder.span("signature_verify"):
+            verify_slack_signature(
+                timestamp=request.headers.get("X-Slack-Request-Timestamp"),
+                signature=request.headers.get("X-Slack-Signature"),
+                raw_body=raw,
+            )
+        with recorder.span("parse_payload"):
+            payload = json.loads(raw.decode("utf-8"))
+    except HTTPException:
+        raise
+
+    if payload.get("type") == "url_verification":
+        return {"challenge": payload.get("challenge")}
+
+    event = payload.get("event") or {}
+    if event.get("type") != "message":
+        return {"ok": True, "ignored": True}
+
+    if event.get("subtype") is not None:
+        return {"ok": True, "ignored": True, "reason": "skipped_non_plain_message"}
+
+    slack_user_id = event.get("user")
+    text = event.get("text")
+    channel_id = event.get("channel")
+    ts = event.get("ts")
+    tenant_fallback = "default"
+
+    if not slack_user_id or not text or not channel_id:
+        persist_slack_trace(
+            db,
+            recorder,
+            user=None,
+            tenant_id=tenant_fallback,
+            slack_channel_id=channel_id,
+            slack_message_ts=str(ts) if ts is not None else None,
+            slack_user_id=slack_user_id,
+            outcome="malformed_event",
+        )
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "detail": "malformed slack event payload",
+                "trace_id": recorder.trace_id,
+            },
+        )
+
+    with recorder.span("user_resolve"):
+        user = db.query(User).filter(User.slack_user_id == slack_user_id).first()
+
+    if not user:
+        persist_slack_trace(
+            db,
+            recorder,
+            user=None,
+            tenant_id=tenant_fallback,
+            slack_channel_id=channel_id,
+            slack_message_ts=str(ts) if ts is not None else None,
+            slack_user_id=slack_user_id,
+            outcome="user_not_mapped",
+        )
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "detail": "slack user is not mapped to an internal user",
+                "trace_id": recorder.trace_id,
+            },
+        )
+
+    if _slack_events_async_enabled():
+        background_tasks.add_task(
+            _slack_orchestration_background,
+            http_client,
+            recorder,
+            user.id,
+            dict(event),
+            slack_user_id,
+            text,
+            channel_id,
+            ts,
+        )
+        return {"ok": True, "accepted": True, "trace_id": recorder.trace_id}
+
+    return await _orchestrate_slack_message_after_user_map(
+        http_client,
+        recorder,
+        db,
+        user,
+        event=event,
+        slack_user_id=slack_user_id,
+        text=text,
+        channel_id=channel_id,
+        ts=ts,
+    )
 
 
 @router.get("/traces/{trace_id}")

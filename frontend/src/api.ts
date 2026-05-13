@@ -399,8 +399,15 @@ export async function getNextActionOutcomes(days?: number): Promise<ActionOutcom
 
 export async function getInsightExplanation(
   insightId: string,
+  params?: { days?: number; baseline_days?: number },
 ): Promise<InsightExplanationResponse> {
-  return request<InsightExplanationResponse>(`/insights/explain/${encodeURIComponent(insightId)}`);
+  const query = new URLSearchParams();
+  if (params?.days != null) query.set("days", String(params.days));
+  if (params?.baseline_days != null) query.set("baseline_days", String(params.baseline_days));
+  const q = query.toString();
+  return request<InsightExplanationResponse>(
+    `/insights/explain/${encodeURIComponent(insightId)}${q ? `?${q}` : ""}`,
+  );
 }
 
 export async function getWeeklyRetro(): Promise<WeeklyRetroResponse> {
