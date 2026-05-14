@@ -1,28 +1,16 @@
-# Smart Task Tracker - AI Middleware Backend
+# Smart Task Tracker (FastAPI backend)
 
-Backend-first orchestration platform where an LLM plans actions and the server enforces validation, authorization, execution, and audit logging.
+This repo is a small task API with a few extras: JWT auth, SQLite storage, an optional OpenAI hook for summaries and for the `/chat` tool flow, and a Slack events handler if you want to wire a workspace in.
 
-Source of truth for architecture and roadmap: `project.md`.
+The boring rule we actually stick to: **the model suggests a tool and arguments; the server decides if that is allowed and then runs the real code.** Nothing hits the database on trust alone.
 
-## What this backend does
+If you care about the full architecture write-up, it lives in `project.md`. Note: some clones list `project.md` in `.gitignore`, so you might not see it until you add or restore that file locally.
 
-- JWT-authenticated task operations
-- Natural-language orchestration endpoint (`POST /chat`)
-- Strict planner output validation before execution
-- Policy/authorization checks before tool execution
-- Audit log persistence for orchestration requests
-- Insights endpoints (priority, productivity, anomalies, next actions, outcomes)
-- Background daily summary scheduler
+---
 
-This repository intentionally supports channel integrations (Slack/email/API clients). A frontend is out of scope for the roadmap.
+## Run it on your machine
 
-## Stack (current)
-
-- FastAPI + SQLAlchemy
-- SQLite (current local DB), designed to migrate toward PostgreSQL
-- OpenAI API (planner + AI routes)
-
-## Run locally
+Python 3, a venv, then:
 
 ```bash
 python -m venv .venv
@@ -34,27 +22,27 @@ set OPENAI_MODEL=gpt-4o-mini
 uvicorn app.main:app --reload
 ```
 
-### Slack `/slack/events` (optional)
+On macOS/Linux, swap `set` for `export`.
 
-For production-like requests you must set **`SLACK_SIGNING_SECRET`** and send valid `X-Slack-Request-Timestamp` / `X-Slack-Signature` headers (see Slack Events API docs).
+Then open **http://127.0.0.1:8000/docs** — Swagger is the fastest way to try endpoints without writing a client.
 
-For **local smoke tests only**, you can disable signature verification:
+There is also a **React UI** under `frontend/` (Vite). It is not the source of truth for the big design doc, but it is handy: `npm install`, copy `frontend/.env.example` to `.env`, `npm run dev`, and point `VITE_API_BASE_URL` at the API if needed.
 
-```bash
-set SLACK_SKIP_SIGNATURE_VERIFY=true
-```
+---
 
-Never enable **`SLACK_SKIP_SIGNATURE_VERIFY`** in production.
+## Slack (completely optional)
 
-Ensure the Slack user exists on `users.slack_user_id` for your test payloads (map a Slack member ID to an internal user in the DB). Requires **`OPENAI_API_KEY`** for the planner step.
+If you are not touching Slack, skip this whole section.
 
-To **post bot replies** in the channel (or thread) after orchestration, set **`SLACK_BOT_TOKEN`** to the Bot User OAuth Token (`xoxb-...`) with the `chat:write` scope (and install the app to the workspace). Without it, `/slack/events` still runs and returns JSON, but nothing is posted to Slack.
+For real traffic you need **`SLACK_SIGNING_SECRET`** and Slack's signature headers. For a quick local poke only, some people use **`SLACK_SKIP_SIGNATURE_VERIFY=true`** — **do not** ship that to production.
 
-For **real Slack event subscriptions**, keep **`SLACK_EVENTS_ASYNC=true`** (default) so the server responds within Slack’s window while planner/execution runs afterward. For **local debugging** of the full orchestration JSON in the same HTTP response, set `SLACK_EVENTS_ASYNC=false`.
+Your Slack user id has to exist on the **`users.slack_user_id`** column or mapping will fail. Planner calls still want **`OPENAI_API_KEY`**.
 
-Example URL verification (no signature headers needed when skip is on):
+If you want the bot to actually post in the thread, set **`SLACK_BOT_TOKEN`** (`xoxb-...`, `chat:write`). Without it you still get JSON back from the API, just silence in the channel.
 
-**PowerShell** — `curl` is an alias for `Invoke-WebRequest`, so use **`Invoke-RestMethod`** or **`curl.exe`** (real curl):
+**`SLACK_EVENTS_ASYNC`** defaults to `true` so Slack gets a fast `ok` while work continues in the background. Flip it to `false` when you want the full JSON in one HTTP response for debugging.
+
+URL verification example (PowerShell — remember `curl` is often `Invoke-WebRequest`; `curl.exe` is the real one):
 
 ```powershell
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/slack/events" -Method POST -ContentType "application/json" -Body '{"type":"url_verification","challenge":"hello"}'
@@ -64,37 +52,48 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/slack/events" -Method POST -Conten
 curl.exe -s -X POST http://127.0.0.1:8000/slack/events -H "Content-Type: application/json" -d "{\"type\":\"url_verification\",\"challenge\":\"hello\"}"
 ```
 
-**Git Bash / WSL / macOS / Linux:**
+Linux / Git Bash / WSL:
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/slack/events -H "Content-Type: application/json" -d '{"type":"url_verification","challenge":"hello"}'
 ```
 
-Optional: **`REDIS_URL`** enables Redis on app startup (request counters on `/chat` when configured).
+If you set **`REDIS_URL`**, the app boots a Redis client (used for things like `/chat` request counting when present).
 
-API:
+---
 
-- `http://127.0.0.1:8000`
-- Swagger docs: `http://127.0.0.1:8000/docs`
+## What’s actually here (short map)
 
-## Core orchestration endpoints
+**Orchestration (natural language → tool → DB):**
 
-- `POST /chat` - natural-language request -> planner -> validator -> authz -> execution
-- `POST /clarify` - clarification loop response intake
-- `GET /audit/{id}` - fetch orchestration audit record
+- `POST /chat` and `POST /chat/stream` — planner, validation, policy, execution, audit row
+- `POST /clarify` — send a follow-up when the model asked for clarification
+- `GET /audit/{id}` — pull one audit record
 
-Supporting domain endpoints remain available under:
+**Tasks (normal REST, no LLM in the middle):**
 
-- `/tasks`
-- `/summary`
-- `/insights`
-- `/analytics`
-- `/demo`
-- `/ai`
+- `POST /tasks`, `GET /tasks`, `GET /tasks/{id}`, `PUT /tasks/{id}`, `DELETE /tasks/{id}`
 
-## Demo account (optional)
+**Summaries and insights:**
 
-- email: `demo@smarttracker.local`
-- password: `demo1234`
+- `/summary/*` — daily summary, weekly retro
+- `/insights/*` — productivity, priority, anomalies, explain endpoints, next-best-actions + feedback, and a combined **`GET /insights/snapshot`** if you want one round trip
+- `/analytics/playback` — day-by-day KPI slices
 
-`DEMO_MODE=true` enables demo-only flows.
+**Other:**
+
+- `/auth/*` — register, login, `me`
+- `/ai/*` — parse text into tasks, roadmap planning, agent-style commands (OpenAI when configured)
+- `/demo/*` — gated demo reset/scenarios/personas when `DEMO_MODE=true` and you are on the demo email
+- `/slack/events` and `/slack/traces/{trace_id}` — Slack path + trace fetch
+
+---
+
+## Demo login
+
+Handy if you turned on demo mode:
+
+- **Email:** `demo@smarttracker.local`
+- **Password:** `demo1234`
+
+Demo-only routes will not cooperate unless **`DEMO_MODE=true`** and you are that user.
