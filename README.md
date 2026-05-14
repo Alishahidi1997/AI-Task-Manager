@@ -2,7 +2,7 @@
 
 This repo is a small task API with a few extras: JWT auth, SQLite storage, an optional OpenAI hook for summaries and for the `/chat` tool flow, and a Slack events handler if you want to wire a workspace in.
 
-The boring rule we actually stick to: **the model suggests a tool and arguments; the server decides if that is allowed and then runs the real code.** Nothing hits the database on trust alone.
+**the model suggests a tool and arguments; the server decides if that is allowed and then runs the real code.** Nothing hits the database on trust alone.
 
 If you care about the full architecture write-up, it lives in `project.md`. Note: some clones list `project.md` in `.gitignore`, so you might not see it until you add or restore that file locally.
 
