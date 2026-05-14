@@ -408,3 +408,80 @@ def build_next_actions(tasks, feedback_rows, guess_fn):
         "total_candidates": len(rows),
         "actions": top,
     }
+
+
+def build_insights_snapshot(
+    done_tasks,
+    pending_tasks,
+    all_tasks,
+    feedback_rows,
+    guess_fn,
+    *,
+    anomaly_window_days: int = 30,
+    anomaly_baseline_days: int = 7,
+):
+    """
+    One payload for dashboards/channels: reuses productivity, priority, KPI anomalies,
+    and next-actions builders (same limits/callers as individual routes).
+    """
+    now = datetime.now(timezone.utc)
+    prod = build_productivity_insights(done_tasks, guess_fn)
+    pri = build_priority_suggestions(pending_tasks, guess_fn)
+    anom = detect_kpi_anomalies(
+        all_tasks, window_days=anomaly_window_days, baseline_days=anomaly_baseline_days
+    )
+    nxt = build_next_actions(pending_tasks, feedback_rows, guess_fn)
+
+    flagged = anom.get("anomalies") or []
+    top_anom = flagged[0] if flagged else None
+    top_actions = nxt.get("actions") or []
+    top_preview = [
+        {
+            "feedback_key": a["feedback_key"],
+            "action_type": a["action_type"],
+            "rank_score": a["rank_score"],
+            "task_title": a.get("task_title"),
+        }
+        for a in top_actions[:5]
+    ]
+    high_pri = sum(1 for t in pri.get("tasks") or [] if t.get("priority") == "high")
+
+    return {
+        "generated_at": now.isoformat(),
+        "params": {
+            "anomaly_window_days": anom.get("window_days", anomaly_window_days),
+            "anomaly_baseline_days": anom.get("baseline_days", anomaly_baseline_days),
+        },
+        "productivity": {
+            "bucket_count": len(prod.get("buckets") or []),
+            "narrative": prod.get("narrative") or "",
+        },
+        "priority": {
+            "total_overdue": pri.get("total_overdue", 0),
+            "high_priority_overdue_in_view": high_pri,
+            "tasks_previewed": len(pri.get("tasks") or []),
+            "suggestion": pri.get("suggestion") or "",
+        },
+        "anomalies": {
+            "window_days": anom.get("window_days"),
+            "baseline_days": anom.get("baseline_days"),
+            "flagged_count": len(flagged),
+            "snapshots_used": anom.get("snapshots_used"),
+            "top": (
+                {
+                    "metric": top_anom["metric"],
+                    "direction": top_anom["direction"],
+                    "impact": top_anom["impact"],
+                    "date": top_anom["date"],
+                    "confidence": top_anom.get("confidence"),
+                }
+                if top_anom
+                else None
+            ),
+        },
+        "next_actions": {
+            "total_candidates": nxt.get("total_candidates", 0),
+            "top_ranked": top_preview,
+            "suggestion": nxt.get("suggestion") or "",
+        },
+    }

@@ -13,6 +13,7 @@ from app.services.category_guess import guess_category
 from app.services.insights import (
     build_anomalies_explanation,
     build_insight_explanation,
+    build_insights_snapshot,
     build_next_actions,
     build_priority_suggestions,
     build_productivity_insights,
@@ -70,6 +71,59 @@ def _apply_next_action(action_type: str, task: Task):
             task.status = "in_progress"
     else:
         raise HTTPException(status_code=400, detail=f"unsupported action_type '{action_type}'")
+
+
+@router.get("/snapshot")
+def insights_snapshot(
+    days: int = Query(default=30, ge=8, le=120),
+    baseline_days: int = Query(default=7, ge=3, le=21),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Single round-trip digest: productivity, overdue priority, KPI anomalies, next-actions."""
+    if baseline_days >= days:
+        raise HTTPException(
+            status_code=400,
+            detail="baseline_days must be smaller than days so each day has a prior window",
+        )
+    done = (
+        db.query(Task)
+        .filter(Task.status == "done", Task.user_id == current_user.id)
+        .order_by(Task.id.desc())
+        .limit(200)
+        .all()
+    )
+    pending = (
+        db.query(Task)
+        .filter(Task.status != "done", Task.user_id == current_user.id)
+        .filter(Task.due_date.is_not(None))
+        .order_by(Task.due_date.asc())
+        .limit(800)
+        .all()
+    )
+    all_tasks = (
+        db.query(Task)
+        .filter(Task.user_id == current_user.id)
+        .order_by(Task.created_at.asc(), Task.id.asc())
+        .limit(3000)
+        .all()
+    )
+    feedback = (
+        db.query(NextActionFeedback)
+        .filter(NextActionFeedback.user_id == current_user.id)
+        .order_by(NextActionFeedback.id.desc())
+        .limit(2000)
+        .all()
+    )
+    return build_insights_snapshot(
+        done,
+        pending,
+        all_tasks,
+        feedback,
+        guess_category,
+        anomaly_window_days=days,
+        anomaly_baseline_days=baseline_days,
+    )
 
 
 @router.get("/productivity")

@@ -1,100 +1,209 @@
-# Smart Task Tracker - AI Middleware Backend
+# Smart Task Tracker
 
-Backend-first orchestration platform where an LLM plans actions and the server enforces validation, authorization, execution, and audit logging.
+This project is a **FastAPI backend** (plus a small **React** UI in `frontend/`) built around a simple idea: people should be able to talk to software in natural language, but **the server should still own the database**. The model’s job is to pick a structured action and fill in fields; your code checks it, applies policy, runs the real insert/update/delete, and writes an audit row.
 
-Source of truth for architecture and roadmap: `project.md`.
 
-## What this backend does
 
-- JWT-authenticated task operations
-- Natural-language orchestration endpoint (`POST /chat`)
-- Strict planner output validation before execution
-- Policy/authorization checks before tool execution
-- Audit log persistence for orchestration requests
-- Insights endpoints (priority, productivity, anomalies, next actions, outcomes)
-- Background daily summary scheduler
+## What you need
 
-This repository intentionally supports channel integrations (Slack/email/API clients). A frontend is out of scope for the roadmap.
+- **Python 3.10+** (roughly; whatever runs your venv)
+- **pip** and a virtualenv
+- **Optional:** `OPENAI_API_KEY` if you want summaries, `/chat`, `/ai/*`, or the Slack planner to call OpenAI
+- **Optional:** Node.js if you want the React UI
 
-## Stack (current)
+---
 
-- FastAPI + SQLAlchemy
-- SQLite (current local DB), designed to migrate toward PostgreSQL
-- OpenAI API (planner + AI routes)
+## Install and run the API
 
-## Run locally
+From the repo root:
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate
+```
+
+Activate the venv:
+
+- **Windows (cmd/PowerShell):** `.venv\Scripts\activate`
+- **macOS / Linux:** `source .venv/bin/activate`
+
+Then:
+
+```bash
 pip install -r requirements.txt
+```
+
+Set env vars (examples below use Windows `set`; on macOS/Linux use `export` instead).
+
+Minimum to boot and use REST + most insights:
+
+```bash
 set DEMO_MODE=true
-set OPENAI_API_KEY=your_key_here
-set OPENAI_MODEL=gpt-4o-mini
 uvicorn app.main:app --reload
 ```
 
-### Slack `/slack/events` (optional)
-
-For production-like requests you must set **`SLACK_SIGNING_SECRET`** and send valid `X-Slack-Request-Timestamp` / `X-Slack-Signature` headers (see Slack Events API docs).
-
-For **local smoke tests only**, you can disable signature verification:
+If you want OpenAI-backed features:
 
 ```bash
-set SLACK_SKIP_SIGNATURE_VERIFY=true
+set OPENAI_API_KEY=sk-...
+set OPENAI_MODEL=gpt-4o-mini
 ```
 
-Never enable **`SLACK_SKIP_SIGNATURE_VERIFY`** in production.
+Open **http://127.0.0.1:8000/docs** — Swagger lists every route and lets you try them after you log in and paste the Bearer token.
 
-Ensure the Slack user exists on `users.slack_user_id` for your test payloads (map a Slack member ID to an internal user in the DB). Requires **`OPENAI_API_KEY`** for the planner step.
+---
 
-To **post bot replies** in the channel (or thread) after orchestration, set **`SLACK_BOT_TOKEN`** to the Bot User OAuth Token (`xoxb-...`) with the `chat:write` scope (and install the app to the workspace). Without it, `/slack/events` still runs and returns JSON, but nothing is posted to Slack.
-
-For **real Slack event subscriptions**, keep **`SLACK_EVENTS_ASYNC=true`** (default) so the server responds within Slack’s window while planner/execution runs afterward. For **local debugging** of the full orchestration JSON in the same HTTP response, set `SLACK_EVENTS_ASYNC=false`.
-
-Example URL verification (no signature headers needed when skip is on):
-
-**PowerShell** — `curl` is an alias for `Invoke-WebRequest`, so use **`Invoke-RestMethod`** or **`curl.exe`** (real curl):
-
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/slack/events" -Method POST -ContentType "application/json" -Body '{"type":"url_verification","challenge":"hello"}'
-```
-
-```powershell
-curl.exe -s -X POST http://127.0.0.1:8000/slack/events -H "Content-Type: application/json" -d "{\"type\":\"url_verification\",\"challenge\":\"hello\"}"
-```
-
-**Git Bash / WSL / macOS / Linux:**
+## Run the React UI (optional)
 
 ```bash
-curl -s -X POST http://127.0.0.1:8000/slack/events -H "Content-Type: application/json" -d '{"type":"url_verification","challenge":"hello"}'
+cd frontend
+npm install
+copy .env.example .env
+npm run dev
 ```
 
-Optional: **`REDIS_URL`** enables Redis on app startup (request counters on `/chat` when configured).
+Default API URL in `.env.example` is `http://127.0.0.1:8000`. Change `VITE_API_BASE_URL` if your API lives elsewhere.
 
-API:
+---
 
-- `http://127.0.0.1:8000`
-- Swagger docs: `http://127.0.0.1:8000/docs`
+## HTTP endpoints (overview)
 
-## Core orchestration endpoints
+Paths are relative to the API root (e.g. `http://127.0.0.1:8000`).
 
-- `POST /chat` - natural-language request -> planner -> validator -> authz -> execution
-- `POST /clarify` - clarification loop response intake
-- `GET /audit/{id}` - fetch orchestration audit record
+**Auth**
 
-Supporting domain endpoints remain available under:
+| Method | Path | What it does |
+| --- | --- | --- |
+| POST | `/auth/register` | Create account, returns JWT |
+| POST | `/auth/login` | Returns JWT |
+| GET | `/auth/me` | Who am I (needs Bearer token) |
 
-- `/tasks`
-- `/summary`
-- `/insights`
-- `/analytics`
-- `/demo`
-- `/ai`
+**Tasks (direct REST — no LLM)**
 
-## Demo account (optional)
+| Method | Path | What it does |
+| --- | --- | --- |
+| POST | `/tasks` | Create task (body: title, description, due_date, optional category) |
+| GET | `/tasks` | List your tasks; query `status`, `due_before`, `due_after` |
+| GET | `/tasks/{id}` | One task |
+| PUT | `/tasks/{id}` | Update fields / status (workflow rules apply) |
+| DELETE | `/tasks/{id}` | Delete |
 
-- email: `demo@smarttracker.local`
-- password: `demo1234`
+**Natural language orchestration (LLM in the loop)**
 
-`DEMO_MODE=true` enables demo-only flows.
+| Method | Path | What it does |
+| --- | --- | --- |
+| POST | `/chat` | Message in → planner (OpenAI) → validate → policy → execute tool → JSON out + audit id |
+| POST | `/chat/stream` | Same idea, streamed response |
+| POST | `/clarify` | Answer a clarification the planner asked for |
+| GET | `/audit/{id}` | Fetch one orchestration audit row |
+
+**Summaries**
+
+| Method | Path | What it does |
+| --- | --- | --- |
+| GET | `/summary/daily` | Latest stored daily summary (may generate if needed) |
+| GET | `/summary/weekly-retro` | Structured weekly retro from your task data |
+
+**Insights and analytics**
+
+| Method | Path | What it does |
+| --- | --- | --- |
+| GET | `/insights/snapshot` | One JSON: productivity + priority + anomalies + next-actions digest |
+| GET | `/insights/productivity` | Bucketed completion speed |
+| GET | `/insights/priority` | Overdue tasks, sorted |
+| GET | `/insights/anomalies` | KPI spikes/drops vs baseline (`days`, `baseline_days` query params) |
+| GET | `/insights/explain/{insight_id}` | Longer “why” text for supported ids (`productivity`, `priority`, `anomalies`) |
+| GET | `/insights/next-actions` | Ranked recovery suggestions on overdue work |
+| POST | `/insights/next-actions/outcome` | Record accepted / dismissed / completed |
+| POST | `/insights/next-actions/apply` | Apply a suggested change to a task + record outcome |
+| GET | `/insights/next-actions/outcomes` | Rollup of feedback over a window |
+| GET | `/analytics/playback` | Time series of completions, overdue count, cycle time (`from`, `to`, `step`) |
+
+**AI helpers (OpenAI when key is set)**
+
+| Method | Path | What it does |
+| --- | --- | --- |
+| POST | `/ai/parse-task` | Turn free text into structured task fields |
+| POST | `/ai/plan-task` | Roadmap-style task breakdown |
+| POST | `/ai/agent-command` | Agent-style command with tools |
+
+**Demo (only with `DEMO_MODE=true` and the demo email)**
+
+| Method | Path | What it does |
+| --- | --- | --- |
+| GET | `/demo/scenarios` | List seeded scenarios |
+| POST | `/demo/load/{scenario_id}` | Load a scenario |
+| POST | `/demo/reset` | Reset demo data |
+| GET | `/demo/personas/{role}/dashboard` | Role-shaped dashboard (`manager`, `analyst`, `executive`) |
+
+**Slack**
+
+| Method | Path | What it does |
+| --- | --- | --- |
+| POST | `/slack/events` | Slack Events API: verify signature, map user, planner, validate, policy, execute, audit, optional bot reply |
+| GET | `/slack/traces/{trace_id}` | Fetch orchestration trace for the owning user |
+
+**Misc**
+
+| GET | `/` | Small JSON health check |
+
+---
+
+## Which tools does the LLM get?
+
+There are **two different planners** in this repo. They do not share the exact same tool list.
+
+### 1) Slack (`POST /slack/events`)
+
+After Slack’s request is verified and your internal `User` is found, tools are filtered by **`users.role`** (`employee`, `manager`, `admin`):
+
+| Role | Tools the model may see |
+| --- | --- |
+| **employee** | `create_task`, `update_task` |
+| **manager** | `create_task`, `update_task`, `assign_task`, `delete_task` |
+| **admin** | all manager tools plus `admin_tools` |
+
+Registry definitions (what the prompt advertises) live in `app/orchestration/tool_registry.py`:
+
+- **create_task** — required: `assignee`, `title`, `due_date`; optional: `priority`
+- **update_task** — required: `task_id`; optional: `status`, `assignee`, `due_date`, `title`, `description`
+- **assign_task** — required: `task_id`, `assignee`
+- **delete_task** — required: `task_id`
+- **admin_tools** — required: `action`; optional: `payload` (in the current codebase this tool is **advertised to the admin role** but **execution raises** — it is not wired to real admin behavior yet)
+
+Execution for Slack is implemented in `app/services/slack_execution.py` (validated arguments only).
+
+### 2) API chat (`POST /chat`, `POST /chat/stream`)
+
+This path uses a **smaller** built-in registry in `app/services/chat_orchestrator.py`:
+
+- **create_task** — required: `title`, `due_date`; optional: `priority`, `assignee`, `description`, `category`
+- **update_task** — required: `task_id`; optional: `status`, `assignee`, `due_date`, `title`, `description`
+- **delete_task** — required: `task_id`
+
+Authorization there is permission-based (e.g. assignee and high priority gated for non-managers) inside that module — it is **not** identical to the Slack role table above.
+
+---
+
+## Slack env vars (only if you use Slack)
+
+- **`SLACK_SIGNING_SECRET`** — required for real signed requests
+- **`SLACK_BOT_TOKEN`** — if you want `chat.postMessage` replies in the thread
+- **`SLACK_SKIP_SIGNATURE_VERIFY=true`** — local testing only; never in production
+- **`SLACK_EVENTS_ASYNC`** — default `true` (fast ack to Slack); `false` if you want the full JSON in the HTTP response while debugging
+
+---
+
+## Demo account
+
+If `DEMO_MODE=true`:
+
+- **Email:** `demo@smarttracker.local`
+- **Password:** `demo1234`
+
+Demo routes and reset/load only work for that account.
+
+---
+
+## Where the architecture is spelled out
+
+See `project.md` in your tree for the long-form design narrative (layers, Slack flow, roadmap). If the file is missing in a fresh clone, check `.gitignore` — some setups ignore it on purpose.
