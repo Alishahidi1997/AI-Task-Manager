@@ -19,6 +19,7 @@ from app.services.slack_execution import execute_slack_tool
 from app.services.slack_idempotency import (
     claim_slack_event,
     duplicate_slack_response,
+    fail_stuck_processing_claim,
     should_skip_execution,
     slack_event_id_from_payload,
 )
@@ -172,6 +173,7 @@ async def _slack_orchestration_background(
                 slack_event_id=slack_event_id,
             )
         except HTTPException as exc:
+            fail_stuck_processing_claim(db, slack_event_id)
             raw = exc.detail
             msg = raw.get("detail", str(raw)) if isinstance(raw, dict) else str(raw)
             await _post_slack_user_message(
@@ -181,6 +183,9 @@ async def _slack_orchestration_background(
                 event=event,
                 text=f"I couldn't process that request: {msg[:3500]}",
             )
+        except Exception:
+            fail_stuck_processing_claim(db, slack_event_id)
+            raise
     finally:
         db.close()
 

@@ -23,12 +23,6 @@ TOOLS = [
         "required_fields": ["task_id"],
         "optional_fields": [],
     },
-    {
-        "name": "admin_tools",
-        "description": "Administrative operations",
-        "required_fields": ["action"],
-        "optional_fields": ["payload"],
-    },
 ]
 
 

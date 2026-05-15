@@ -22,5 +22,11 @@ def enforce_policies(identity_context: dict, tool: str, arguments: dict):
         except ValueError:
             raise PermissionError("due_date must be valid ISO datetime")
 
-    if tool == "admin_tools" and role != "admin":
-        raise PermissionError("admin_tools is restricted to admin role")
+    if tool == "delete_task" and role not in {"manager", "admin"}:
+        raise PermissionError("only managers/admins can delete tasks")
+
+    if arguments.get("priority") == "high" and role not in {"manager", "admin"}:
+        raise PermissionError("high priority tasks require manager or admin role")
+
+    if tool == "admin_tools":
+        raise PermissionError("admin_tools is not available in this build")

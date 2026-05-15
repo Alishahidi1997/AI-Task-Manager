@@ -15,6 +15,14 @@ from app.services.chat_orchestrator import orchestrate_chat, orchestrate_chat_st
 router = APIRouter(tags=["chat"])
 
 
+def _audit_validation_result(execution_status: str) -> str:
+    if execution_status == "executed":
+        return "passed"
+    if execution_status == "clarification_required":
+        return "clarification"
+    return "failed"
+
+
 class ChatIn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -55,7 +63,7 @@ async def chat(
             request_text=payload.message,
             tool_name=planner.get("tool_name"),
             arguments=json.dumps(planner.get("arguments", {}), ensure_ascii=True),
-            validation_result="passed" if result.get("status") == "executed" else "clarification",
+            validation_result=_audit_validation_result(result.get("status", "unknown")),
             execution_result=result.get("status", "unknown"),
             user_id=current_user.id,
             tenant_id=tenant_id,
@@ -158,7 +166,7 @@ async def chat_stream(
                 request_text=payload.message,
                 tool_name=planner.get("tool_name"),
                 arguments=json.dumps(planner.get("arguments", {}), ensure_ascii=True),
-                validation_result="passed" if inner.get("status") == "executed" else "clarification",
+                validation_result=_audit_validation_result(inner.get("status", "unknown")),
                 execution_result=inner.get("status", "unknown"),
                 user_id=current_user.id,
                 tenant_id=tenant_id,

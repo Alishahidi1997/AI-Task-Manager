@@ -8,26 +8,16 @@ from app.database import get_db
 from app.models import Task, User, utcnow
 from app.schemas import Status, TaskCreate, TaskOut, TaskUpdate
 from app.services.category_guess import guess_category
+from app.services.task_workflow import assert_status_transition
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
-# simple status workflow for updates
-# todo -> in_progress -> done
-# and allow reopening done back to in_progress
-ALLOWED_TRANSITIONS = {
-    "todo": {"todo", "in_progress"},
-    "in_progress": {"in_progress", "done", "todo"},
-    "done": {"done", "in_progress"},
-}
-
 
 def _check_status_transition(current_status: str, next_status: str):
-    allowed = ALLOWED_TRANSITIONS.get(current_status, set())
-    if next_status not in allowed:
-        raise HTTPException(
-            status_code=400,
-            detail=f"invalid status workflow: {current_status} -> {next_status}",
-        )
+    try:
+        assert_status_transition(current_status, next_status)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("", response_model=TaskOut, status_code=status.HTTP_201_CREATED)

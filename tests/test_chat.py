@@ -8,7 +8,7 @@ from tests.conftest import auth_headers
 
 @pytest.fixture
 def mock_chat_planner(monkeypatch):
-    async def fake_llm_plan(client, message, identity_ctx, source, conversation_id):
+    async def fake_llm_plan(client, message, identity_ctx, tool_registry, source, conversation_id):
         due = datetime.now(timezone.utc) + timedelta(days=2)
         parsed = {
             "tool_name": "create_task",

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Task, User
 from app.services.category_guess import guess_category
+from app.services.task_workflow import assert_status_transition
 
 VALID_STATUS = {"todo", "in_progress", "done"}
 VALID_CATEGORY = {"today", "this_week", "routine", "backlog"}
@@ -122,6 +123,7 @@ def execute_slack_tool(*, tool: str, arguments: dict, user: User, db: Session) -
         if args.status is not None:
             if args.status not in VALID_STATUS:
                 raise ValueError("invalid status")
+            assert_status_transition(task.status, args.status)
             task.status = args.status
             if args.status == "done":
                 task.completed_at = datetime.now(timezone.utc)

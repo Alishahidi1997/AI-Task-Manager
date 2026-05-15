@@ -6,12 +6,16 @@ import httpx
 from pydantic import BaseModel, Field, ValidationError
 
 from app.llm.openai_client import stream_chat_completion_text
-
 from app.models import Task
 from app.services.category_guess import guess_category
+from app.services.rbac import allowed_tools_for_role
+from app.services.task_workflow import assert_status_transition
+from app.validation.json_validator import validate_chat_planner_output
+from app.validation.policy_engine import enforce_policies
 
 VALID_STATUS = {"todo", "in_progress", "done"}
 VALID_CATEGORY = {"today", "this_week", "routine", "backlog"}
+CHAT_TOOL_NAMES = frozenset({"create_task", "update_task", "delete_task"})
 
 
 class CreateTaskArgs(BaseModel):
@@ -61,6 +65,13 @@ def _tool_registry() -> dict:
     }
 
 
+def _chat_tool_registry_for_user(user) -> dict:
+    """Role-filtered tool schemas exposed to the chat planner."""
+    allowed = set(allowed_tools_for_role(user.role)) & CHAT_TOOL_NAMES
+    full = _tool_registry()
+    return {name: full[name] for name in allowed if name in full}
+
+
 def _validate_tool_output(payload: PlannerOutput):
     if payload.tool_name not in _tool_registry():
         raise ValueError(f"unknown tool '{payload.tool_name}'")
@@ -75,36 +86,21 @@ def _validate_tool_output(payload: PlannerOutput):
 
 
 def _build_identity_context(user):
-    role = "manager" if str(user.email).startswith("demo@") else "member"
-    permissions = {"task:create", "task:update", "task:delete"}
-    if role == "manager":
-        permissions.add("task:assign")
-        permissions.add("task:high_priority")
+    role = (user.role or "employee").strip().lower()
     return {
-        "user_id": str(user.id),
-        "tenant_id": f"user-{user.id}",
+        "user_id": user.id,
+        "tenant_id": user.tenant_id or f"user-{user.id}",
         "role": role,
-        "permissions": sorted(list(permissions)),
+        "tenant": user.tenant_id or f"user-{user.id}",
     }
 
 
-def _authorize(identity_ctx: dict, tool_name: str, args):
-    perms = set(identity_ctx["permissions"])
-    if tool_name == "create_task" and "task:create" not in perms:
-        raise PermissionError("missing permission task:create")
-    if tool_name == "update_task" and "task:update" not in perms:
-        raise PermissionError("missing permission task:update")
-    if tool_name == "delete_task" and "task:delete" not in perms:
-        raise PermissionError("missing permission task:delete")
-
-    assignee = getattr(args, "assignee", None)
-    if assignee and "task:assign" not in perms:
-        raise PermissionError("assigning tasks requires manager role")
-    if getattr(args, "priority", None) == "high" and "task:high_priority" not in perms:
-        raise PermissionError("high priority tasks require manager role")
-    due_date = getattr(args, "due_date", None)
-    if due_date is not None and due_date < datetime.now(timezone.utc):
-        raise PermissionError("due_date cannot be in the past")
+def _policy_context(identity_ctx: dict) -> dict:
+    return {
+        "user_id": identity_ctx["user_id"],
+        "role": identity_ctx["role"],
+        "tenant": identity_ctx["tenant"],
+    }
 
 
 def _api_key_header() -> dict[str, str]:
@@ -114,9 +110,10 @@ def _api_key_header() -> dict[str, str]:
     return {"Authorization": "Bearer " + api_key, "Content-Type": "application/json"}
 
 
-def _chat_planner_openai_payload(message: str, identity_ctx: dict, source: str, conversation_id: str | None) -> dict:
+def _chat_planner_openai_payload(
+    message: str, identity_ctx: dict, tool_registry: dict, source: str, conversation_id: str | None
+) -> dict:
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
-    registry = _tool_registry()
     now_iso = datetime.now(timezone.utc).isoformat()
     system_text = (
         "You are a strict planner. Output JSON only with keys: "
@@ -126,7 +123,7 @@ def _chat_planner_openai_payload(message: str, identity_ctx: dict, source: str, 
     user_text = (
         f"now={now_iso}\nsource={source}\nconversation_id={conversation_id}\n"
         f"identity={json.dumps(identity_ctx)}\n"
-        f"tool_registry={json.dumps(registry)}\n"
+        f"tool_registry={json.dumps(tool_registry)}\n"
         f"request={message}"
     )
     return {
@@ -142,9 +139,14 @@ def _chat_planner_openai_payload(message: str, identity_ctx: dict, source: str, 
 
 
 async def _llm_plan_async(
-    client: httpx.AsyncClient, message: str, identity_ctx: dict, source: str, conversation_id: str | None
+    client: httpx.AsyncClient,
+    message: str,
+    identity_ctx: dict,
+    tool_registry: dict,
+    source: str,
+    conversation_id: str | None,
 ):
-    payload = _chat_planner_openai_payload(message, identity_ctx, source, conversation_id)
+    payload = _chat_planner_openai_payload(message, identity_ctx, tool_registry, source, conversation_id)
     response = await client.post(
         "https://api.openai.com/v1/chat/completions",
         headers=_api_key_header(),
@@ -157,7 +159,8 @@ async def _llm_plan_async(
         parsed = json.loads(content)
     except json.JSONDecodeError as exc:
         raise ValueError("invalid JSON from planner") from exc
-    return PlannerOutput(**parsed), parsed
+    validated = validate_chat_planner_output(parsed, tool_registry=tool_registry)
+    return validated, parsed
 
 
 def _complete_after_plan(
@@ -185,7 +188,7 @@ def _complete_after_plan(
         validated_args = _validate_tool_output(planner_output)
     except (ValidationError, ValueError) as exc:
         raise ValueError(f"validation failed: {exc}") from exc
-    _authorize(identity_ctx, planner_output.tool_name, validated_args)
+    enforce_policies(_policy_context(identity_ctx), planner_output.tool_name, planner_output.arguments)
     result = _execute(planner_output.tool_name, validated_args, current_user, db)
     return {
         "status": "executed",
@@ -225,9 +228,12 @@ def _execute(tool_name: str, args, current_user, db):
         if args.due_date is not None:
             task.due_date = args.due_date
         if args.status is not None:
+            assert_status_transition(task.status, args.status)
             task.status = args.status
             if args.status == "done":
                 task.completed_at = datetime.now(timezone.utc)
+            elif task.completed_at is not None:
+                task.completed_at = None
         db.add(task)
         db.commit()
         db.refresh(task)
@@ -250,8 +256,9 @@ async def orchestrate_chat(
     http_client: httpx.AsyncClient,
 ):
     identity_ctx = _build_identity_context(current_user)
+    tool_registry = _chat_tool_registry_for_user(current_user)
     planner_output, raw_output = await _llm_plan_async(
-        http_client, message, identity_ctx, source, conversation_id
+        http_client, message, identity_ctx, tool_registry, source, conversation_id
     )
     return _complete_after_plan(planner_output, raw_output, identity_ctx, current_user, db)
 
@@ -266,8 +273,9 @@ async def orchestrate_chat_stream(
 ):
     """SSE-style stream: start → planner_token chunks → final result object."""
     identity_ctx = _build_identity_context(current_user)
+    tool_registry = _chat_tool_registry_for_user(current_user)
     yield {"event": "start", "identity": identity_ctx}
-    payload = _chat_planner_openai_payload(message, identity_ctx, source, conversation_id)
+    payload = _chat_planner_openai_payload(message, identity_ctx, tool_registry, source, conversation_id)
     buf: list[str] = []
     async for delta in stream_chat_completion_text(http_client, payload):
         buf.append(delta)
@@ -278,6 +286,6 @@ async def orchestrate_chat_stream(
     except json.JSONDecodeError as exc:
         yield {"event": "error", "detail": "invalid JSON from planner"}
         raise ValueError("invalid JSON from planner") from exc
-    planner_output = PlannerOutput(**parsed)
+    planner_output = validate_chat_planner_output(parsed, tool_registry=tool_registry)
     result = _complete_after_plan(planner_output, parsed, identity_ctx, current_user, db)
     yield {"event": "result", **result}

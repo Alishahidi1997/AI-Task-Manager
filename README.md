@@ -145,4 +145,4 @@ Uses a temporary SQLite file (`DATABASE_URL`), not your dev `db.sqlite3`. Schedu
 python -m pytest
 ```
 
-Covers health, auth, task CRUD, Slack URL verification + unmapped user, and `/chat` with a mocked planner (no OpenAI key required).
+Covers health, auth, task CRUD, Slack URL verification + unmapped user, `/chat` with a mocked planner, Slack idempotency, status workflow, insights snapshot, and stale-claim reclaim (no OpenAI key required).

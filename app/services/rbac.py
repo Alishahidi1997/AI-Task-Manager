@@ -1,7 +1,7 @@
 ROLE_TOOL_ALLOWLIST = {
     "employee": {"create_task", "update_task"},
     "manager": {"create_task", "update_task", "assign_task", "delete_task"},
-    "admin": {"create_task", "update_task", "assign_task", "delete_task", "admin_tools"},
+    "admin": {"create_task", "update_task", "assign_task", "delete_task"},
 }
 
 
