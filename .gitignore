@@ -180,5 +180,7 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Flow / implementation / architecture docs (local working notes — not README)
 project.md
-.project.md
+PROJECT_WORKFLOW.md
+AI_MIDDLEWARE_WORKFLOW.md

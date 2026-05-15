@@ -69,6 +69,7 @@ class AuditLog(Base):
     execution_result = Column(String(32), nullable=False, default="unknown")
     user_id = Column(Integer, nullable=False, default=1)
     tenant_id = Column(String(128), nullable=False, default="default")
+    slack_event_id = Column(String(128), nullable=True, unique=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 

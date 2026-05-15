@@ -166,6 +166,41 @@ export type AnomaliesResponse = {
   anomalies: AnomalyItem[];
 };
 
+export type InsightsSnapshotResponse = {
+  generated_at: string;
+  params: { anomaly_window_days: number; anomaly_baseline_days: number };
+  productivity: { bucket_count: number; narrative: string };
+  priority: {
+    total_overdue: number;
+    high_priority_overdue_in_view: number;
+    tasks_previewed: number;
+    suggestion: string;
+  };
+  anomalies: {
+    window_days: number;
+    baseline_days: number;
+    flagged_count: number;
+    snapshots_used: number;
+    top: {
+      metric: string;
+      direction: string;
+      impact: number;
+      date: string;
+      confidence?: number;
+    } | null;
+  };
+  next_actions: {
+    total_candidates: number;
+    top_ranked: Array<{
+      feedback_key: string;
+      action_type: string;
+      rank_score: number;
+      task_title?: string;
+    }>;
+    suggestion: string;
+  };
+};
+
 export type NextActionOutcome = "accepted" | "dismissed" | "completed";
 
 export type NextActionItem = {
@@ -321,6 +356,17 @@ export async function getInsightAnomalies(params?: {
   if (params?.baseline_days != null) query.set("baseline_days", String(params.baseline_days));
   const q = query.toString();
   return request<AnomaliesResponse>(`/insights/anomalies${q ? `?${q}` : ""}`);
+}
+
+export async function getInsightsSnapshot(params?: {
+  days?: number;
+  baseline_days?: number;
+}): Promise<InsightsSnapshotResponse> {
+  const query = new URLSearchParams();
+  if (params?.days != null) query.set("days", String(params.days));
+  if (params?.baseline_days != null) query.set("baseline_days", String(params.baseline_days));
+  const q = query.toString();
+  return request<InsightsSnapshotResponse>(`/insights/snapshot${q ? `?${q}` : ""}`);
 }
 
 export async function getNextActions(): Promise<NextActionsResponse> {

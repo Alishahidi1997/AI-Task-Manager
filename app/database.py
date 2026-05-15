@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
@@ -7,7 +8,8 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DB_FILE = ROOT_DIR / "db.sqlite3"
 
-DATABASE_URL = f"sqlite:///{DB_FILE.as_posix()}"
+_env_url = os.getenv("DATABASE_URL", "").strip()
+DATABASE_URL = _env_url if _env_url else f"sqlite:///{DB_FILE.as_posix()}"
 
 
 class Base(DeclarativeBase):
@@ -95,7 +97,18 @@ def migrate_sqlite(engine):
                 "execution_result VARCHAR(32) NOT NULL, "
                 "user_id INTEGER NOT NULL, "
                 "tenant_id VARCHAR(128) NOT NULL, "
+                "slack_event_id VARCHAR(128), "
                 "created_at DATETIME NOT NULL)"
+            )
+        )
+        audit_rows = conn.execute(text("PRAGMA table_info(audit_logs)")).fetchall()
+        audit_cols = {r[1] for r in audit_rows}
+        if "slack_event_id" not in audit_cols:
+            conn.execute(text("ALTER TABLE audit_logs ADD COLUMN slack_event_id VARCHAR(128)"))
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_audit_logs_slack_event_id "
+                "ON audit_logs (slack_event_id) WHERE slack_event_id IS NOT NULL"
             )
         )
 

@@ -16,6 +16,12 @@ from app.orchestration.tool_registry import filter_tools, tool_schema_map
 from app.services.rbac import allowed_tools_for_role
 from app.services.slack_bot_client import chat_post_message, slack_bot_token
 from app.services.slack_execution import execute_slack_tool
+from app.services.slack_idempotency import (
+    claim_slack_event,
+    duplicate_slack_response,
+    should_skip_execution,
+    slack_event_id_from_payload,
+)
 from app.services.slack_observability import (
     SlackTraceRecorder,
     persist_slack_trace,
@@ -75,6 +81,7 @@ def _audit_row(
     arguments: dict | None,
     validation_result: str,
     execution_result: str,
+    slack_event_id: str | None = None,
 ) -> AuditLog:
     row = AuditLog(
         request_text=request_text,
@@ -84,11 +91,49 @@ def _audit_row(
         execution_result=execution_result,
         user_id=user.id,
         tenant_id=user.tenant_id or "default",
+        slack_event_id=slack_event_id,
     )
     db.add(row)
     db.commit()
     db.refresh(row)
     return row
+
+
+def _save_audit(
+    db: Session,
+    claim_row: AuditLog | None,
+    *,
+    request_text: str,
+    user: User,
+    tool_name: str | None,
+    arguments: dict | None,
+    validation_result: str,
+    execution_result: str,
+    slack_event_id: str | None = None,
+) -> AuditLog:
+    """Update the idempotency claim row when present; otherwise insert a new audit row."""
+    if claim_row is not None:
+        claim_row.request_text = request_text
+        claim_row.tool_name = tool_name
+        claim_row.arguments = (
+            json.dumps(arguments, ensure_ascii=True) if arguments is not None else None
+        )
+        claim_row.validation_result = validation_result
+        claim_row.execution_result = execution_result
+        db.add(claim_row)
+        db.commit()
+        db.refresh(claim_row)
+        return claim_row
+    return _audit_row(
+        db,
+        request_text=request_text,
+        user=user,
+        tool_name=tool_name,
+        arguments=arguments,
+        validation_result=validation_result,
+        execution_result=execution_result,
+        slack_event_id=slack_event_id,
+    )
 
 
 def _slack_events_async_enabled() -> bool:
@@ -106,6 +151,7 @@ async def _slack_orchestration_background(
     text: str,
     channel_id: str,
     ts,
+    slack_event_id: str | None,
 ) -> None:
     db = SessionLocal()
     try:
@@ -123,6 +169,7 @@ async def _slack_orchestration_background(
                 text=text,
                 channel_id=channel_id,
                 ts=ts,
+                slack_event_id=slack_event_id,
             )
         except HTTPException as exc:
             raw = exc.detail
@@ -149,6 +196,7 @@ async def _orchestrate_slack_message_after_user_map(
     text: str,
     channel_id: str,
     ts,
+    slack_event_id: str | None,
 ) -> dict:
     tenant_id = user.tenant_id or "default"
     allowed = allowed_tools_for_role(user.role)
@@ -166,6 +214,30 @@ async def _orchestrate_slack_message_after_user_map(
         "channel_id": channel_id,
         "timestamp": ts or datetime.utcnow().timestamp(),
     }
+
+    claim_status, claim_row = claim_slack_event(
+        db, slack_event_id, user=user, request_text=text
+    )
+    if claim_status == "duplicate" and claim_row is not None:
+        outcome = (
+            "duplicate_executed"
+            if claim_row.execution_result == "executed"
+            else "duplicate_replay"
+        )
+        persist_slack_trace(
+            db,
+            recorder,
+            user=user,
+            tenant_id=tenant_id,
+            slack_channel_id=channel_id,
+            slack_message_ts=str(ts) if ts is not None else None,
+            slack_user_id=slack_user_id,
+            outcome=outcome,
+            audit_log_id=claim_row.id,
+        )
+        return duplicate_slack_response(
+            claim_row, trace_id=recorder.trace_id, normalized=normalized
+        )
 
     try:
         with recorder.span("planner_llm"):
@@ -187,14 +259,16 @@ async def _orchestrate_slack_message_after_user_map(
                 event=event,
                 text=f"I need a bit more detail:\n{clarify_q}",
             )
-            row = _audit_row(
+            row = _save_audit(
                 db,
+                claim_row,
                 request_text=text,
                 user=user,
                 tool_name=validated_plan.tool,
                 arguments=validated_plan.arguments,
                 validation_result="clarification",
                 execution_result="clarification_required",
+                slack_event_id=slack_event_id,
             )
             persist_slack_trace(
                 db,
@@ -231,14 +305,16 @@ async def _orchestrate_slack_message_after_user_map(
             event=event,
             text=f"I can't run that (policy): {str(exc)[:3500]}",
         )
-        row = _audit_row(
+        row = _save_audit(
             db,
+            claim_row,
             request_text=text,
             user=user,
             tool_name=None,
             arguments=None,
             validation_result="failed",
             execution_result="policy_rejected",
+            slack_event_id=slack_event_id,
         )
         persist_slack_trace(
             db,
@@ -265,14 +341,16 @@ async def _orchestrate_slack_message_after_user_map(
         return body
     except Exception as exc:
         try:
-            row = _audit_row(
+            row = _save_audit(
                 db,
+                claim_row,
                 request_text=text,
                 user=user,
                 tool_name=None,
                 arguments=None,
                 validation_result="failed",
                 execution_result="failed",
+                slack_event_id=slack_event_id,
             )
             persist_slack_trace(
                 db,
@@ -295,6 +373,23 @@ async def _orchestrate_slack_message_after_user_map(
             },
         ) from exc
 
+    prior_executed = should_skip_execution(db, slack_event_id)
+    if prior_executed is not None:
+        persist_slack_trace(
+            db,
+            recorder,
+            user=user,
+            tenant_id=tenant_id,
+            slack_channel_id=channel_id,
+            slack_message_ts=str(ts) if ts is not None else None,
+            slack_user_id=slack_user_id,
+            outcome="duplicate_executed",
+            audit_log_id=prior_executed.id,
+        )
+        return duplicate_slack_response(
+            prior_executed, trace_id=recorder.trace_id, normalized=normalized
+        )
+
     try:
         with recorder.span("execution"):
             exec_result = execute_slack_tool(
@@ -311,14 +406,16 @@ async def _orchestrate_slack_message_after_user_map(
             event=event,
             text=f"I can't complete that (permission): {str(exc)[:3500]}",
         )
-        row = _audit_row(
+        row = _save_audit(
             db,
+            claim_row,
             request_text=text,
             user=user,
             tool_name=validated_plan.tool,
             arguments=validated_plan.arguments,
             validation_result="passed",
             execution_result="denied",
+            slack_event_id=slack_event_id,
         )
         persist_slack_trace(
             db,
@@ -352,14 +449,16 @@ async def _orchestrate_slack_message_after_user_map(
             event=event,
             text=f"I couldn't complete that: {str(exc)[:3500]}",
         )
-        row = _audit_row(
+        row = _save_audit(
             db,
+            claim_row,
             request_text=text,
             user=user,
             tool_name=validated_plan.tool,
             arguments=validated_plan.arguments,
             validation_result="passed",
             execution_result="failed",
+            slack_event_id=slack_event_id,
         )
         persist_slack_trace(
             db,
@@ -400,14 +499,16 @@ async def _orchestrate_slack_message_after_user_map(
         text=" ".join(success_bits),
     )
 
-    row = _audit_row(
+    row = _save_audit(
         db,
+        claim_row,
         request_text=text,
         user=user,
         tool_name=validated_plan.tool,
         arguments=validated_plan.arguments,
         validation_result="passed",
         execution_result="executed",
+        slack_event_id=slack_event_id,
     )
     persist_slack_trace(
         db,
@@ -516,6 +617,8 @@ async def slack_events(
             },
         )
 
+    slack_event_id = slack_event_id_from_payload(payload, event)
+
     if _slack_events_async_enabled():
         background_tasks.add_task(
             _slack_orchestration_background,
@@ -527,6 +630,7 @@ async def slack_events(
             text,
             channel_id,
             ts,
+            slack_event_id,
         )
         return {"ok": True, "accepted": True, "trace_id": recorder.trace_id}
 
@@ -540,6 +644,7 @@ async def slack_events(
         text=text,
         channel_id=channel_id,
         ts=ts,
+        slack_event_id=slack_event_id,
     )
 
 

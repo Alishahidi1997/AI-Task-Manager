@@ -73,9 +73,12 @@ async def lifespan(app: FastAPI):
     else:
         app.state.redis = None
 
-    scheduler = start_scheduler()
+    scheduler = None
+    if os.getenv("DISABLE_SCHEDULER", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        scheduler = start_scheduler()
     yield
-    scheduler.shutdown(wait=False)
+    if scheduler is not None:
+        scheduler.shutdown(wait=False)
 
     await app.state.http_client.aclose()
     if getattr(app.state, "redis", None) is not None:

@@ -12,6 +12,7 @@ import {
   getProductivityInsights,
   getInsightExplanation,
   getInsightAnomalies,
+  getInsightsSnapshot,
   getNextActions,
   recordNextActionOutcome,
   applyNextAction,
@@ -46,6 +47,7 @@ import type {
   TaskStatus,
   PlaybackResponse,
   AnomaliesResponse,
+  InsightsSnapshotResponse,
   NextActionsResponse,
   NextActionOutcome,
   ActionOutcomesResponse,
@@ -181,6 +183,8 @@ function App() {
   const [playbackPresetDays, setPlaybackPresetDays] = useState<30 | 60 | 90>(30);
   const [playbackCursor, setPlaybackCursor] = useState(0);
   const [anomalies, setAnomalies] = useState<AnomaliesResponse | null>(null);
+  const [insightsSnapshot, setInsightsSnapshot] = useState<InsightsSnapshotResponse | null>(null);
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [nextActions, setNextActions] = useState<NextActionsResponse | null>(null);
   const [actionOutcomes, setActionOutcomes] = useState<ActionOutcomesResponse | null>(null);
   const [updatingNextActionKey, setUpdatingNextActionKey] = useState<string | null>(null);
@@ -311,6 +315,23 @@ function App() {
       setInsightsError(err instanceof Error ? err.message : "Could not load insights");
     } finally {
       setInsightsLoading(false);
+    }
+  }
+
+  async function loadInsightsSnapshot() {
+    if (!isAuthenticated) return;
+    setSnapshotLoading(true);
+    setError("");
+    try {
+      const data = await getInsightsSnapshot({
+        days: anomalies?.window_days ?? 30,
+        baseline_days: anomalies?.baseline_days ?? 7,
+      });
+      setInsightsSnapshot(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load insights snapshot");
+    } finally {
+      setSnapshotLoading(false);
     }
   }
 
@@ -1221,6 +1242,55 @@ function App() {
         ) : (
           <p>No summary yet.</p>
         )}
+          </section>
+
+          <section className="panel">
+            <div className="list-head">
+              <h2>Insights snapshot</h2>
+              <button type="button" onClick={() => void loadInsightsSnapshot()} disabled={snapshotLoading}>
+                {snapshotLoading ? "Loading..." : "Load combined digest"}
+              </button>
+            </div>
+            <p className="muted">
+              One request merges productivity, overdue priority, KPI anomalies, and ranked next-actions
+              (same logic as the individual insight endpoints).
+            </p>
+            {insightsSnapshot ? (
+              <div className="insight-block">
+                <p>
+                  <strong>Productivity:</strong> {insightsSnapshot.productivity.narrative}
+                </p>
+                <p>
+                  <strong>Priority:</strong> {insightsSnapshot.priority.suggestion} (overdue total{" "}
+                  {insightsSnapshot.priority.total_overdue}, high in view{" "}
+                  {insightsSnapshot.priority.high_priority_overdue_in_view})
+                </p>
+                <p>
+                  <strong>Anomalies:</strong> {insightsSnapshot.anomalies.flagged_count} flag(s); window{" "}
+                  {insightsSnapshot.anomalies.window_days}d, baseline {insightsSnapshot.anomalies.baseline_days}d
+                  {insightsSnapshot.anomalies.top ? (
+                    <>
+                      {" "}
+                      — top: {insightsSnapshot.anomalies.top.metric} {insightsSnapshot.anomalies.top.direction}{" "}
+                      (impact {insightsSnapshot.anomalies.top.impact})
+                    </>
+                  ) : null}
+                </p>
+                <p>
+                  <strong>Next actions:</strong> {insightsSnapshot.next_actions.suggestion} (
+                  {insightsSnapshot.next_actions.total_candidates} candidate(s))
+                </p>
+                {insightsSnapshot.next_actions.top_ranked.length > 0 ? (
+                  <ul className="simple-list">
+                    {insightsSnapshot.next_actions.top_ranked.map((row) => (
+                      <li key={row.feedback_key}>
+                        <strong>{row.action_type}</strong> {row.task_title ?? ""} (score {row.rank_score})
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
           </section>
 
           <section className="panel">

@@ -111,13 +111,18 @@ Unlike typical LLM wrapper applications:
 
 ---
 
-## Future Improvements
+## Phase 2 (implementation roadmap)
 
-- Add Redis caching and rate limiting
-- Move execution layer to RabbitMQ worker system
-- Add Prometheus and Grafana observability
-- Expand evaluation suite for LLM tool accuracy
-- Deploy full production demo (API + frontend)
+Cursor-executable **Epics 1–4** with acceptance criteria, file targets, and Composer prompts live in **`project.md` → Phase 2: Production-Ready**.
+
+| Epic | Focus |
+| --- | --- |
+| 1 | PostgreSQL + Alembic, RabbitMQ workers, Redis rate limit / cache |
+| 2 | `ThreadManager` (context drift), entity resolution for assignees/tasks |
+| 3 | Semantic policy engine, unified AI audit trail |
+| 4 | `tests/evals` golden set, tool/parameter accuracy benchmarks in CI |
+
+**Done:** pytest integration tests (`python -m pytest`).
 
 ---
 
@@ -125,6 +130,19 @@ Unlike typical LLM wrapper applications:
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload
+```
+
+API docs: http://127.0.0.1:8000/docs
+
+### Tests
+
+Uses a temporary SQLite file (`DATABASE_URL`), not your dev `db.sqlite3`. Scheduler is off; Slack signature check is skipped.
+
+```bash
+python -m pytest
+```
+
+Covers health, auth, task CRUD, Slack URL verification + unmapped user, and `/chat` with a mocked planner (no OpenAI key required).
