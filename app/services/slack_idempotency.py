@@ -21,9 +21,11 @@ _TERMINAL_DUPLICATE = frozenset(
         "execution_failed",
         "validation_failed",
         "failed",
-        "abandoned",
     }
 )
+
+# Recoverable — worker crash/timeout; Slack retries may reclaim and re-run.
+_RECLAIMABLE = frozenset({"processing", "abandoned"})
 
 _STALE_PROCESSING_SECONDS = int(os.getenv("SLACK_IDEMPOTENCY_STALE_SECONDS", "300"))
 
@@ -69,15 +71,27 @@ def find_duplicate_audit(db: Session, slack_event_id: str) -> AuditLog | None:
         return None
     if row.execution_result in _TERMINAL_DUPLICATE:
         return row
-    if row.execution_result == "processing":
-        if is_stale_processing(row):
+    if row.execution_result in _RECLAIMABLE:
+        if row.execution_result == "abandoned" or is_stale_processing(row):
             return None
         return row
     return None
 
 
+def _reclaim_claim_row(db: Session, row: AuditLog, *, request_text: str) -> AuditLog:
+    row.request_text = request_text
+    row.tool_name = None
+    row.arguments = None
+    row.validation_result = "pending"
+    row.execution_result = "processing"
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
 def fail_stuck_processing_claim(db: Session, slack_event_id: str | None) -> None:
-    """Mark an in-flight claim failed so Slack retries can reclaim after stale TTL."""
+    """Release an in-flight claim so the next Slack retry can reclaim immediately."""
     if not slack_event_id:
         return
     row = (
@@ -92,7 +106,7 @@ def fail_stuck_processing_claim(db: Session, slack_event_id: str | None) -> None
     if row is None:
         return
     row.validation_result = "failed"
-    row.execution_result = "failed"
+    row.execution_result = "abandoned"
     db.add(row)
     db.commit()
 
@@ -123,17 +137,11 @@ def claim_slack_event(
     if existing is not None:
         if existing.execution_result in _TERMINAL_DUPLICATE:
             return "duplicate", existing
+        if existing.execution_result == "abandoned":
+            return "proceed", _reclaim_claim_row(db, existing, request_text=request_text)
         if existing.execution_result == "processing":
             if is_stale_processing(existing):
-                existing.request_text = request_text
-                existing.tool_name = None
-                existing.arguments = None
-                existing.validation_result = "pending"
-                existing.execution_result = "processing"
-                db.add(existing)
-                db.commit()
-                db.refresh(existing)
-                return "proceed", existing
+                return "proceed", _reclaim_claim_row(db, existing, request_text=request_text)
             return "duplicate", existing
 
     prior = find_duplicate_audit(db, slack_event_id)
@@ -165,15 +173,10 @@ def claim_slack_event(
         )
         if raced is None:
             return "proceed", None
+        if raced.execution_result == "abandoned":
+            return "proceed", _reclaim_claim_row(db, raced, request_text=request_text)
         if raced.execution_result == "processing" and is_stale_processing(raced):
-            raced.request_text = request_text
-            raced.validation_result = "pending"
-            raced.tool_name = None
-            raced.arguments = None
-            db.add(raced)
-            db.commit()
-            db.refresh(raced)
-            return "proceed", raced
+            return "proceed", _reclaim_claim_row(db, raced, request_text=request_text)
         return "duplicate", raced
 
 

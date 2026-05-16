@@ -73,6 +73,28 @@ class AuditLog(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
+class LLMJob(Base):
+    """Queued LLM / orchestration work (RabbitMQ worker + GET /jobs/{job_id})."""
+
+    __tablename__ = "llm_jobs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    job_id = Column(String(36), nullable=False, unique=True, index=True)
+    job_type = Column(String(64), nullable=False)
+    status = Column(String(32), nullable=False, default="pending")
+    user_id = Column(Integer, nullable=False, index=True)
+    tenant_id = Column(String(128), nullable=False, default="default")
+    idempotency_key = Column(String(255), nullable=True, index=True)
+    channel = Column(String(32), nullable=False, default="api")
+    request_text = Column(Text, nullable=False)
+    payload_json = Column(Text, nullable=False)
+    result_json = Column(Text, nullable=True)
+    audit_log_id = Column(Integer, nullable=True)
+    error_text = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
 class SlackOrchestrationTrace(Base):
     """Structured timing spans and metrics for POST /slack/events (beyond flat audit_logs rows)."""
 

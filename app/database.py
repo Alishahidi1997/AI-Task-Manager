@@ -114,6 +114,27 @@ def migrate_sqlite(engine):
 
         conn.execute(
             text(
+                "CREATE TABLE IF NOT EXISTS llm_jobs ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "job_id VARCHAR(36) NOT NULL UNIQUE, "
+                "job_type VARCHAR(64) NOT NULL, "
+                "status VARCHAR(32) NOT NULL, "
+                "user_id INTEGER NOT NULL, "
+                "tenant_id VARCHAR(128) NOT NULL, "
+                "idempotency_key VARCHAR(255), "
+                "channel VARCHAR(32) NOT NULL, "
+                "request_text TEXT NOT NULL, "
+                "payload_json TEXT NOT NULL, "
+                "result_json TEXT, "
+                "audit_log_id INTEGER, "
+                "error_text TEXT, "
+                "created_at DATETIME NOT NULL, "
+                "updated_at DATETIME NOT NULL)"
+            )
+        )
+
+        conn.execute(
+            text(
                 "CREATE TABLE IF NOT EXISTS slack_orchestration_traces ("
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, "
                 "trace_id VARCHAR(36) NOT NULL UNIQUE, "

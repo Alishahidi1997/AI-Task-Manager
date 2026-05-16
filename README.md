@@ -117,7 +117,7 @@ Cursor-executable **Epics 1–4** with acceptance criteria, file targets, and Co
 
 | Epic | Focus |
 | --- | --- |
-| 1 | PostgreSQL + Alembic, RabbitMQ workers, Redis rate limit / cache |
+| 1 | PostgreSQL + Alembic, **RabbitMQ for LLM/orchestration jobs** (Slack, `/chat`, summaries), Redis rate limit / cache |
 | 2 | `ThreadManager` (context drift), entity resolution for assignees/tasks |
 | 3 | Semantic policy engine, unified AI audit trail |
 | 4 | `tests/evals` golden set, tool/parameter accuracy benchmarks in CI |
@@ -136,6 +136,24 @@ uvicorn app.main:app --reload
 ```
 
 API docs: http://127.0.0.1:8000/docs
+
+### Optional: RabbitMQ for LLM orchestration (Phase 2 Epic 1.2)
+
+Offloads `/chat` and async Slack orchestration to a worker so the API does not hold OpenAI connections.
+
+```bash
+docker compose up -d rabbitmq
+export RABBITMQ_URL=amqp://guest:guest@localhost:5672/
+# LLM_QUEUE_ENABLED=true by default when RABBITMQ_URL is set
+uvicorn app.main:app --reload
+python -m app.worker.main
+```
+
+- `POST /chat` → **202** with `job_id`; poll `GET /jobs/{job_id}`
+- Slack events → `200` ack + `job_id` when async; worker runs the same orchestration pipeline
+- Management UI: http://localhost:15672 (guest/guest)
+
+Without `RABBITMQ_URL`, behavior is unchanged (sync `/chat`, in-process Slack background tasks).
 
 ### Tests
 

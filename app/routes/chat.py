@@ -1,7 +1,7 @@
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 import httpx
@@ -10,7 +10,9 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.deps import get_http_client, get_redis
 from app.models import AuditLog, User
+from app.queue.config import llm_queue_enabled
 from app.services.chat_orchestrator import orchestrate_chat, orchestrate_chat_stream
+from app.services.llm_queue_enqueue import enqueue_chat_orchestration
 
 router = APIRouter(tags=["chat"])
 
@@ -49,6 +51,31 @@ async def chat(
     tenant_id = f"user-{current_user.id}"
     if redis is not None:
         await redis.incr("stats:chat_requests")
+
+    if llm_queue_enabled():
+        try:
+            job_id = await enqueue_chat_orchestration(
+                db,
+                user=current_user,
+                message=payload.message,
+                source=payload.source,
+                conversation_id=payload.conversation_id,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"could not enqueue chat job: {exc}",
+            ) from exc
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "status": "accepted",
+                "job_id": job_id,
+                "poll_url": f"/jobs/{job_id}",
+                "message": "Chat orchestration queued; poll GET /jobs/{job_id} for result.",
+            },
+        )
+
     try:
         result = await orchestrate_chat(
             payload.message,

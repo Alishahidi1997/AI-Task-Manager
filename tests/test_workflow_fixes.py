@@ -5,7 +5,11 @@ import pytest
 from app.auth import hash_password
 from app.database import SessionLocal
 from app.models import AuditLog, Task, User
-from app.services.slack_idempotency import claim_slack_event, is_stale_processing
+from app.services.slack_idempotency import (
+    claim_slack_event,
+    fail_stuck_processing_claim,
+    is_stale_processing,
+)
 from app.services.task_workflow import assert_status_transition
 from tests.conftest import auth_headers
 
@@ -42,6 +46,33 @@ def test_stale_processing_detected():
         db.close()
 
 
+def test_abandoned_claim_is_reclaimed_on_retry():
+    db = SessionLocal()
+    try:
+        user = User(
+            email="abandon@example.com",
+            password_hash=hash_password("secret123"),
+            role="employee",
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        key = "Ev_abandon"
+        status, row = claim_slack_event(db, key, user=user, request_text="first")
+        assert status == "proceed"
+        fail_stuck_processing_claim(db, key)
+        db.refresh(row)
+        assert row.execution_result == "abandoned"
+
+        status2, row2 = claim_slack_event(db, key, user=user, request_text="retry")
+        assert status2 == "proceed"
+        assert row2.id == row.id
+        assert row2.execution_result == "processing"
+    finally:
+        db.close()
+
+
 def test_chat_employee_cannot_delete(client, monkeypatch):
     async def fake_plan(client, message, identity_ctx, tool_registry, source, conversation_id):
         from app.services.chat_orchestrator import PlannerOutput
@@ -74,6 +105,15 @@ def test_insights_snapshot_empty_user(client):
     assert "productivity" in body
     assert "anomalies" in body
     assert "next_actions" in body
+
+
+def test_insights_explain_anomalies(client):
+    headers = auth_headers(client, "explain@example.com", "secret123")
+    response = client.get("/insights/explain/anomalies", headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["insight_id"] == "anomalies"
+    assert isinstance(body.get("why"), list)
 
 
 def test_chat_update_respects_status_workflow(client, monkeypatch):

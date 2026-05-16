@@ -28,6 +28,8 @@ from app.services.slack_observability import (
     persist_slack_trace,
     trace_response_summary,
 )
+from app.queue.config import llm_queue_enabled
+from app.services.llm_queue_enqueue import enqueue_slack_orchestration
 from app.services.slack_security import verify_slack_signature
 from app.validation.json_validator import validate_planner_output
 from app.validation.policy_engine import enforce_policies
@@ -625,6 +627,34 @@ async def slack_events(
     slack_event_id = slack_event_id_from_payload(payload, event)
 
     if _slack_events_async_enabled():
+        if llm_queue_enabled():
+            try:
+                job_id = await enqueue_slack_orchestration(
+                    db,
+                    user=user,
+                    trace_id=recorder.trace_id,
+                    event=dict(event),
+                    slack_user_id=slack_user_id,
+                    text=text,
+                    channel_id=channel_id,
+                    ts=ts,
+                    slack_event_id=slack_event_id,
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "detail": f"could not enqueue slack job: {exc}",
+                        "trace_id": recorder.trace_id,
+                    },
+                ) from exc
+            return {
+                "ok": True,
+                "accepted": True,
+                "queued": True,
+                "job_id": job_id,
+                "trace_id": recorder.trace_id,
+            }
         background_tasks.add_task(
             _slack_orchestration_background,
             http_client,
