@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 # sqlite file lives next to requirements.txt (repo root)
@@ -16,17 +17,40 @@ class Base(DeclarativeBase):
     pass
 
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False},
-)
+def is_sqlite() -> bool:
+    return DATABASE_URL.startswith("sqlite")
 
+
+def is_postgres() -> bool:
+    return DATABASE_URL.startswith("postgresql")
+
+
+def _engine_kwargs() -> dict:
+    kwargs: dict = {}
+    if is_sqlite():
+        kwargs["connect_args"] = {"check_same_thread": False}
+    return kwargs
+
+
+engine = create_engine(DATABASE_URL, **_engine_kwargs())
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def migrate_sqlite(engine):
-    # sqlite has no real migrations in this repo — add missing cols by hand
-    with engine.begin() as conn:
+def run_alembic_upgrade() -> None:
+    """Apply Alembic migrations (PostgreSQL and any env using Alembic as source of truth)."""
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config(str(ROOT_DIR / "alembic.ini"))
+    cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
+    command.upgrade(cfg, "head")
+
+
+def migrate_sqlite(bind: Engine) -> None:
+    """Legacy SQLite bootstrap — add missing columns on existing dev DBs."""
+    if not str(bind.url).startswith("sqlite"):
+        return
+    with bind.begin() as conn:
         conn.execute(
             text(
                 "CREATE TABLE IF NOT EXISTS users ("
@@ -60,7 +84,6 @@ def migrate_sqlite(engine):
             conn.execute(text("ALTER TABLE tasks ADD COLUMN user_id INTEGER"))
             conn.execute(text("UPDATE tasks SET user_id = 1 WHERE user_id IS NULL"))
 
-        # old demo used backend/frontend buckets — fold into daily-style labels
         conn.execute(
             text(
                 "UPDATE tasks SET category = 'backlog' "
@@ -151,6 +174,21 @@ def migrate_sqlite(engine):
                 "created_at DATETIME NOT NULL)"
             )
         )
+
+
+def init_db(bind: Engine | None = None) -> None:
+    """
+    SQLite: metadata.create_all + legacy migrate_sqlite (local dev compatibility).
+    PostgreSQL: Alembic upgrade head (schema from app.models).
+    """
+    from app import models  # noqa: F401
+
+    db_engine = bind or engine
+    if is_postgres():
+        run_alembic_upgrade()
+        return
+    Base.metadata.create_all(bind=db_engine)
+    migrate_sqlite(db_engine)
 
 
 def get_db():

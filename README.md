@@ -117,7 +117,7 @@ Cursor-executable **Epics 1–4** with acceptance criteria, file targets, and Co
 
 | Epic | Focus |
 | --- | --- |
-| 1 | PostgreSQL + Alembic, **RabbitMQ for LLM/orchestration jobs** (Slack, `/chat`, summaries), Redis rate limit / cache |
+| 1 | **PostgreSQL + Alembic** [shipped], **RabbitMQ LLM queue** [partial], Redis rate limit / cache |
 | 2 | `ThreadManager` (context drift), entity resolution for assignees/tasks |
 | 3 | Semantic policy engine, unified AI audit trail |
 | 4 | `tests/evals` golden set, tool/parameter accuracy benchmarks in CI |
@@ -136,6 +136,19 @@ uvicorn app.main:app --reload
 ```
 
 API docs: http://127.0.0.1:8000/docs
+
+### Optional: PostgreSQL (Phase 2 Epic 1.1)
+
+SQLite remains the default for zero-config local dev. For Postgres + Alembic migrations:
+
+```bash
+docker compose up -d postgres
+export DATABASE_URL=postgresql+psycopg://smarttask:smarttask@localhost:5432/smarttask
+alembic upgrade head   # or rely on init_db() at API startup
+uvicorn app.main:app --reload
+```
+
+Copy `.env.example` to `.env` and adjust. CI/integration: set `POSTGRES_TEST_URL` to the same URL and run `pytest tests/test_postgres.py`.
 
 ### Optional: RabbitMQ for LLM orchestration (Phase 2 Epic 1.2)
 

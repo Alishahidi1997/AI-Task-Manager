@@ -1,4 +1,20 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: smarttask
+      POSTGRES_PASSWORD: smarttask
+      POSTGRES_DB: smarttask
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smarttask -d smarttask"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     ports:
@@ -19,3 +35,6 @@ services:
       - "6379:6379"
     profiles:
       - full
+
+volumes:
+  postgres_data:

@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth import hash_password
 from app.middleware.request_logging import RequestLoggingMiddleware
-from app.database import Base, SessionLocal, engine, migrate_sqlite
+from app.database import SessionLocal, engine, init_db
 from app.models import Task, User
 from app.routes.ai import router as ai_router
 from app.routes.analytics import router as analytics_router
@@ -29,8 +29,7 @@ async def lifespan(app: FastAPI):
     # import models so sqlalchemy knows about the tables
     from app import models  # noqa: F401
 
-    Base.metadata.create_all(bind=engine)
-    migrate_sqlite(engine)
+    init_db(engine)
 
     # Backfill legacy rows so smart grouping is stored on each task.
     db = SessionLocal()

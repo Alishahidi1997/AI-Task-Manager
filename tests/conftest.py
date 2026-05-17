@@ -31,10 +31,11 @@ def client(test_environment: None) -> Generator[TestClient, None, None]:
 @pytest.fixture(autouse=True)
 def clean_tables(client: TestClient) -> Generator[None, None, None]:
     from app.database import SessionLocal
-    from app.models import AuditLog, DailySummary, NextActionFeedback, SlackOrchestrationTrace, Task, User
+    from app.models import AuditLog, DailySummary, LLMJob, NextActionFeedback, SlackOrchestrationTrace, Task, User
 
     db = SessionLocal()
     try:
+        db.query(LLMJob).delete()
         db.query(NextActionFeedback).delete()
         db.query(SlackOrchestrationTrace).delete()
         db.query(AuditLog).delete()
