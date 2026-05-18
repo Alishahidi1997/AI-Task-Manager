@@ -117,7 +117,7 @@ Cursor-executable **Epics 1–4** with acceptance criteria, file targets, and Co
 
 | Epic | Focus |
 | --- | --- |
-| 1 | **PostgreSQL + Alembic** [shipped], **RabbitMQ LLM queue** [partial], Redis rate limit / cache |
+| 1 | **PostgreSQL + Alembic**, **RabbitMQ LLM queue** [partial], **Redis rate limit + snapshot cache** [shipped] |
 | 2 | `ThreadManager` (context drift), entity resolution for assignees/tasks |
 | 3 | Semantic policy engine, unified AI audit trail |
 | 4 | `tests/evals` golden set, tool/parameter accuracy benchmarks in CI |
@@ -167,6 +167,18 @@ python -m app.worker.main
 - Management UI: http://localhost:15672 (guest/guest)
 
 Without `RABBITMQ_URL`, behavior is unchanged (sync `/chat`, in-process Slack background tasks).
+
+### Optional: Redis rate limits + snapshot cache (Phase 2 Epic 1)
+
+When `REDIS_URL` is set, `/chat`, `/chat/stream`, and Slack message events are rate-limited per user (HTTP **429** with `Retry-After`). `GET /insights/snapshot` is cached briefly (default 60s).
+
+```bash
+docker compose up -d redis
+export REDIS_URL=redis://localhost:6379/0
+uvicorn app.main:app --reload
+```
+
+Tune via `.env.example`: `RATE_LIMIT_CHAT_PER_MINUTE`, `RATE_LIMIT_SLACK_PER_MINUTE`, `INSIGHTS_SNAPSHOT_CACHE_SECONDS`. Set `RATE_LIMIT_ENABLED=false` to keep Redis for stats/cache only.
 
 ### Tests
 

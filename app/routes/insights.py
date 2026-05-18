@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -6,10 +7,12 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
+from app.deps import get_redis
 from app.models import NextActionFeedback, Task, User
 from app.services.action_outcomes import build_next_action_outcomes_dashboard
 from app.services.analytics import detect_kpi_anomalies
 from app.services.category_guess import guess_category
+from app.services.rate_limit import snapshot_cache_ttl
 from app.services.insights import (
     build_anomalies_explanation,
     build_insight_explanation,
@@ -74,11 +77,12 @@ def _apply_next_action(action_type: str, task: Task):
 
 
 @router.get("/snapshot")
-def insights_snapshot(
+async def insights_snapshot(
     days: int = Query(default=30, ge=8, le=120),
     baseline_days: int = Query(default=7, ge=3, le=21),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    redis=Depends(get_redis),
 ):
     """Single round-trip digest: productivity, overdue priority, KPI anomalies, next-actions."""
     if baseline_days >= days:
@@ -86,6 +90,14 @@ def insights_snapshot(
             status_code=400,
             detail="baseline_days must be smaller than days so each day has a prior window",
         )
+
+    cache_ttl = snapshot_cache_ttl()
+    cache_key = f"cache:insights:snapshot:{current_user.id}:{days}:{baseline_days}"
+    if redis is not None and cache_ttl > 0:
+        cached = await redis.get(cache_key)
+        if cached:
+            return json.loads(cached)
+
     done = (
         db.query(Task)
         .filter(Task.status == "done", Task.user_id == current_user.id)
@@ -115,7 +127,7 @@ def insights_snapshot(
         .limit(2000)
         .all()
     )
-    return build_insights_snapshot(
+    result = build_insights_snapshot(
         done,
         pending,
         all_tasks,
@@ -124,6 +136,9 @@ def insights_snapshot(
         anomaly_window_days=days,
         anomaly_baseline_days=baseline_days,
     )
+    if redis is not None and cache_ttl > 0:
+        await redis.setex(cache_key, cache_ttl, json.dumps(result, ensure_ascii=True))
+    return result
 
 
 @router.get("/productivity")

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import SessionLocal, get_db
-from app.deps import get_http_client
+from app.deps import get_http_client, get_redis
 from app.llm.openai_client import plan_tool_call_async
 from app.models import AuditLog, SlackOrchestrationTrace, User
 from app.orchestration.prompt_builder import build_planner_system_prompt
@@ -30,6 +30,7 @@ from app.services.slack_observability import (
 )
 from app.queue.config import llm_queue_enabled
 from app.services.llm_queue_enqueue import enqueue_slack_orchestration
+from app.services.rate_limit import bump_stat, enforce_slack_rate_limit
 from app.services.slack_security import verify_slack_signature
 from app.validation.json_validator import validate_planner_output
 from app.validation.policy_engine import enforce_policies
@@ -552,6 +553,7 @@ async def slack_events(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     http_client: httpx.AsyncClient = Depends(get_http_client),
+    redis=Depends(get_redis),
 ):
     raw = await request.body()
     recorder = SlackTraceRecorder()
@@ -583,6 +585,10 @@ async def slack_events(
     ts = event.get("ts")
     tenant_fallback = "default"
 
+    await bump_stat(redis, "stats:slack_events")
+    if slack_user_id:
+        await enforce_slack_rate_limit(redis, slack_user_id=slack_user_id)
+
     if not slack_user_id or not text or not channel_id:
         persist_slack_trace(
             db,
@@ -604,6 +610,14 @@ async def slack_events(
 
     with recorder.span("user_resolve"):
         user = db.query(User).filter(User.slack_user_id == slack_user_id).first()
+
+    if user is not None:
+        await enforce_slack_rate_limit(
+            redis,
+            slack_user_id=slack_user_id,
+            internal_user_id=user.id,
+            check_slack_uid=False,
+        )
 
     if not user:
         persist_slack_trace(

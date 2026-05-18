@@ -33,8 +33,11 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
-    profiles:
-      - full
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
 volumes:
   postgres_data:

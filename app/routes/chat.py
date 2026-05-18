@@ -13,6 +13,7 @@ from app.models import AuditLog, User
 from app.queue.config import llm_queue_enabled
 from app.services.chat_orchestrator import orchestrate_chat, orchestrate_chat_stream
 from app.services.llm_queue_enqueue import enqueue_chat_orchestration
+from app.services.rate_limit import bump_stat, enforce_chat_rate_limit
 
 router = APIRouter(tags=["chat"])
 
@@ -49,8 +50,8 @@ async def chat(
     redis=Depends(get_redis),
 ):
     tenant_id = f"user-{current_user.id}"
-    if redis is not None:
-        await redis.incr("stats:chat_requests")
+    await bump_stat(redis, "stats:chat_requests")
+    await enforce_chat_rate_limit(redis, current_user.id)
 
     if llm_queue_enabled():
         try:
@@ -137,8 +138,8 @@ async def chat_stream(
 ):
     """Server-sent events: planner tokens streamed, then a final `result` event (same shape as `/chat`)."""
     tenant_id = f"user-{current_user.id}"
-    if redis is not None:
-        await redis.incr("stats:chat_stream_requests")
+    await bump_stat(redis, "stats:chat_stream_requests")
+    await enforce_chat_rate_limit(redis, current_user.id)
 
     async def event_generator():
         final_result = None
