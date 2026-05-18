@@ -114,3 +114,44 @@ def test_slack_duplicate_delivery_skips_second_execution(mock_plan, client, monk
         assert rows[0].execution_result == "executed"
     finally:
         db.close()
+
+
+@patch("app.services.llm_queue_enqueue.publish_llm_job")
+def test_slack_queue_skips_enqueue_on_duplicate(mock_publish, client, monkeypatch):
+    """Queued path must not publish a second job when event_id was already executed."""
+    monkeypatch.setenv("SLACK_EVENTS_ASYNC", "true")
+    monkeypatch.setenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
+    _seed_slack_user(client)
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.slack_user_id == "U_IDEMPOTENCY_TEST").first()
+        key = "Ev_queue_dup"
+        status, row = claim_slack_event(db, key, user=user, request_text="first")
+        assert status == "proceed"
+        row.execution_result = "executed"
+        row.validation_result = "passed"
+        db.commit()
+    finally:
+        db.close()
+
+    payload = {
+        "type": "event_callback",
+        "event_id": "Ev_queue_dup",
+        "event": {
+            "type": "message",
+            "user": "U_IDEMPOTENCY_TEST",
+            "text": "hello again",
+            "channel": "C_IDEM",
+            "ts": "999.002",
+        },
+    }
+    response = client.post(
+        "/slack/events",
+        content=json.dumps(payload),
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body.get("duplicate") is True
+    mock_publish.assert_not_called()

@@ -17,6 +17,8 @@ def test_environment(tmp_path_factory) -> Generator[None, None, None]:
     os.environ["JWT_SECRET_KEY"] = "pytest-jwt-secret"
     os.environ["SLACK_SKIP_SIGNATURE_VERIFY"] = "true"
     os.environ.pop("OPENAI_API_KEY", None)
+    os.environ.pop("RABBITMQ_URL", None)
+    os.environ.pop("REDIS_URL", None)
     yield
 
 

@@ -13,17 +13,10 @@ from app.models import AuditLog, User
 from app.queue.config import llm_queue_enabled
 from app.services.chat_orchestrator import orchestrate_chat, orchestrate_chat_stream
 from app.services.llm_queue_enqueue import enqueue_chat_orchestration
+from app.services.audit_utils import audit_validation_result
 from app.services.rate_limit import bump_stat, enforce_chat_rate_limit
 
 router = APIRouter(tags=["chat"])
-
-
-def _audit_validation_result(execution_status: str) -> str:
-    if execution_status == "executed":
-        return "passed"
-    if execution_status == "clarification_required":
-        return "clarification"
-    return "failed"
 
 
 class ChatIn(BaseModel):
@@ -91,7 +84,7 @@ async def chat(
             request_text=payload.message,
             tool_name=planner.get("tool_name"),
             arguments=json.dumps(planner.get("arguments", {}), ensure_ascii=True),
-            validation_result=_audit_validation_result(result.get("status", "unknown")),
+            validation_result=audit_validation_result(result.get("status", "unknown")),
             execution_result=result.get("status", "unknown"),
             user_id=current_user.id,
             tenant_id=tenant_id,
@@ -194,7 +187,7 @@ async def chat_stream(
                 request_text=payload.message,
                 tool_name=planner.get("tool_name"),
                 arguments=json.dumps(planner.get("arguments", {}), ensure_ascii=True),
-                validation_result=_audit_validation_result(inner.get("status", "unknown")),
+                validation_result=audit_validation_result(inner.get("status", "unknown")),
                 execution_result=inner.get("status", "unknown"),
                 user_id=current_user.id,
                 tenant_id=tenant_id,

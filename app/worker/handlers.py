@@ -10,9 +10,9 @@ import httpx
 from fastapi import HTTPException
 
 from app.database import SessionLocal
-from app.models import AuditLog, User, utcnow
+from app.models import AuditLog, User
 from app.queue.config import JOB_CHAT_ORCHESTRATION, JOB_SLACK_ORCHESTRATION
-from app.routes.chat import _audit_validation_result
+from app.services.audit_utils import audit_validation_result
 from app.services.chat_orchestrator import orchestrate_chat
 from app.services.llm_jobs import mark_job_completed, mark_job_failed, mark_job_running
 from app.services.slack_idempotency import fail_stuck_processing_claim
@@ -27,8 +27,24 @@ def _save_chat_audit(db, *, user_id: int, tenant_id: str, request_text: str, res
         request_text=request_text,
         tool_name=planner.get("tool_name"),
         arguments=json.dumps(planner.get("arguments", {}), ensure_ascii=True),
-        validation_result=_audit_validation_result(result.get("status", "unknown")),
+        validation_result=audit_validation_result(result.get("status", "unknown")),
         execution_result=result.get("status", "unknown"),
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row.id
+
+
+def _save_chat_denied_audit(db, *, user_id: int, tenant_id: str, request_text: str) -> int:
+    row = AuditLog(
+        request_text=request_text,
+        tool_name=None,
+        arguments=None,
+        validation_result="failed",
+        execution_result="denied",
         user_id=user_id,
         tenant_id=tenant_id,
     )
@@ -43,6 +59,7 @@ async def _run_chat_job(message: dict) -> dict:
     user_id = message["user_id"]
     tenant_id = message["tenant_id"]
     inner = message.get("payload") or {}
+    request_text = message.get("request_text", "")
     db = SessionLocal()
     job_row = None
     try:
@@ -57,7 +74,7 @@ async def _run_chat_job(message: dict) -> dict:
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(45.0)) as client:
             result = await orchestrate_chat(
-                inner.get("message", message.get("request_text", "")),
+                inner.get("message", request_text),
                 source=inner.get("source", "api"),
                 conversation_id=inner.get("conversation_id"),
                 current_user=row,
@@ -68,15 +85,23 @@ async def _run_chat_job(message: dict) -> dict:
             db,
             user_id=user_id,
             tenant_id=tenant_id,
-            request_text=message.get("request_text", ""),
+            request_text=request_text,
             result=result,
         )
         if job_row:
             mark_job_completed(db, job_row, result={**result, "audit_id": audit_id}, audit_log_id=audit_id)
         return {**result, "audit_id": audit_id}
     except PermissionError as exc:
+        audit_id = _save_chat_denied_audit(
+            db, user_id=user_id, tenant_id=tenant_id, request_text=request_text
+        )
         if job_row:
-            mark_job_failed(db, job_row, error=str(exc))
+            mark_job_failed(
+                db,
+                job_row,
+                error=str(exc),
+                result={"status": "denied", "audit_id": audit_id},
+            )
         raise
     except Exception as exc:
         if job_row:
@@ -125,6 +150,8 @@ async def _run_slack_job(message: dict) -> dict:
                 )
             except HTTPException as exc:
                 fail_stuck_processing_claim(db, slack_event_id)
+                if job_row:
+                    mark_job_failed(db, job_row, error=str(exc.detail))
                 raw = exc.detail
                 msg = raw.get("detail", str(raw)) if isinstance(raw, dict) else str(raw)
                 await _post_slack_user_message(
@@ -135,8 +162,10 @@ async def _run_slack_job(message: dict) -> dict:
                     text=f"I couldn't process that request: {msg[:3500]}",
                 )
                 raise
-            except Exception:
+            except Exception as exc:
                 fail_stuck_processing_claim(db, slack_event_id)
+                if job_row:
+                    mark_job_failed(db, job_row, error=str(exc))
                 raise
 
         if job_row:

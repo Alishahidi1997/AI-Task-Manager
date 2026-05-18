@@ -29,6 +29,8 @@ def _engine_kwargs() -> dict:
     kwargs: dict = {}
     if is_sqlite():
         kwargs["connect_args"] = {"check_same_thread": False}
+    elif is_postgres():
+        kwargs["pool_pre_ping"] = True
     return kwargs
 
 

@@ -20,6 +20,7 @@ from app.services.slack_idempotency import (
     claim_slack_event,
     duplicate_slack_response,
     fail_stuck_processing_claim,
+    find_duplicate_audit,
     should_skip_execution,
     slack_event_id_from_payload,
 )
@@ -639,9 +640,52 @@ async def slack_events(
         )
 
     slack_event_id = slack_event_id_from_payload(payload, event)
+    normalized = {
+        "slack_user_id": slack_user_id,
+        "text": text,
+        "channel_id": channel_id,
+        "timestamp": ts or datetime.utcnow().timestamp(),
+    }
 
     if _slack_events_async_enabled():
         if llm_queue_enabled():
+            prior = find_duplicate_audit(db, slack_event_id) if slack_event_id else None
+            if prior is not None:
+                outcome = (
+                    "duplicate_executed"
+                    if prior.execution_result == "executed"
+                    else "duplicate_replay"
+                )
+                persist_slack_trace(
+                    db,
+                    recorder,
+                    user=user,
+                    tenant_id=user.tenant_id or "default",
+                    slack_channel_id=channel_id,
+                    slack_message_ts=str(ts) if ts is not None else None,
+                    slack_user_id=slack_user_id,
+                    outcome=outcome,
+                    audit_log_id=prior.id,
+                )
+                return duplicate_slack_response(
+                    prior, trace_id=recorder.trace_id, normalized=normalized
+                )
+            prior_executed = should_skip_execution(db, slack_event_id)
+            if prior_executed is not None:
+                persist_slack_trace(
+                    db,
+                    recorder,
+                    user=user,
+                    tenant_id=user.tenant_id or "default",
+                    slack_channel_id=channel_id,
+                    slack_message_ts=str(ts) if ts is not None else None,
+                    slack_user_id=slack_user_id,
+                    outcome="duplicate_executed",
+                    audit_log_id=prior_executed.id,
+                )
+                return duplicate_slack_response(
+                    prior_executed, trace_id=recorder.trace_id, normalized=normalized
+                )
             try:
                 job_id = await enqueue_slack_orchestration(
                     db,
@@ -655,6 +699,7 @@ async def slack_events(
                     slack_event_id=slack_event_id,
                 )
             except Exception as exc:
+                fail_stuck_processing_claim(db, slack_event_id)
                 raise HTTPException(
                     status_code=503,
                     detail={
