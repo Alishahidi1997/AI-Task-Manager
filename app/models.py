@@ -73,6 +73,21 @@ class AuditLog(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
+class ConversationThread(Base):
+    """Multi-turn planner context for /chat and Slack threads."""
+
+    __tablename__ = "conversation_threads"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    thread_key = Column(String(255), nullable=False, unique=True, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    last_task_id = Column(Integer, nullable=True)
+    turns_json = Column(Text, nullable=False, default="[]")
+    pending_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
 class LLMJob(Base):
     """Queued LLM / orchestration work (RabbitMQ worker + GET /jobs/{job_id})."""
 

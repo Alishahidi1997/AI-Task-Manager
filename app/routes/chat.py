@@ -11,7 +11,7 @@ from app.database import get_db
 from app.deps import get_http_client, get_redis
 from app.models import AuditLog, User
 from app.queue.config import llm_queue_enabled
-from app.services.chat_orchestrator import orchestrate_chat, orchestrate_chat_stream
+from app.services.chat_orchestrator import orchestrate_chat, orchestrate_chat_stream, orchestrate_clarify
 from app.services.llm_queue_enqueue import enqueue_chat_orchestration
 from app.services.audit_utils import audit_validation_result
 from app.services.rate_limit import bump_stat, enforce_chat_rate_limit
@@ -234,17 +234,38 @@ def clarify(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Simple placeholder endpoint for clarification loop orchestration.
-    row = AuditLog(
-        request_text=f"[clarify:{payload.conversation_id}] {payload.answer}",
-        tool_name="clarify",
-        arguments=json.dumps({"conversation_id": payload.conversation_id, "answer": payload.answer}),
-        validation_result="passed",
-        execution_result="received",
-        user_id=current_user.id,
-        tenant_id=f"user-{current_user.id}",
-    )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    return {"status": "clarification_received", "audit_id": row.id}
+    tenant_id = f"user-{current_user.id}"
+    try:
+        result = orchestrate_clarify(
+            payload.conversation_id,
+            payload.answer,
+            current_user=current_user,
+            db=db,
+        )
+        planner = result.get("planner_output") or {}
+        row = AuditLog(
+            request_text=f"[clarify:{payload.conversation_id}] {payload.answer}",
+            tool_name=planner.get("tool_name"),
+            arguments=json.dumps(planner.get("arguments", {}), ensure_ascii=True, default=str),
+            validation_result=audit_validation_result(result.get("status", "unknown")),
+            execution_result=result.get("status", "unknown"),
+            user_id=current_user.id,
+            tenant_id=tenant_id,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return {"audit_id": row.id, **result}
+    except ValueError as exc:
+        row = AuditLog(
+            request_text=f"[clarify:{payload.conversation_id}] {payload.answer}",
+            tool_name=None,
+            arguments=None,
+            validation_result="failed",
+            execution_result="failed",
+            user_id=current_user.id,
+            tenant_id=tenant_id,
+        )
+        db.add(row)
+        db.commit()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -139,6 +139,20 @@ def migrate_sqlite(bind: Engine) -> None:
 
         conn.execute(
             text(
+                "CREATE TABLE IF NOT EXISTS conversation_threads ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "thread_key VARCHAR(255) NOT NULL UNIQUE, "
+                "user_id INTEGER NOT NULL, "
+                "last_task_id INTEGER, "
+                "turns_json TEXT NOT NULL, "
+                "pending_json TEXT, "
+                "created_at DATETIME NOT NULL, "
+                "updated_at DATETIME NOT NULL)"
+            )
+        )
+
+        conn.execute(
+            text(
                 "CREATE TABLE IF NOT EXISTS llm_jobs ("
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, "
                 "job_id VARCHAR(36) NOT NULL UNIQUE, "

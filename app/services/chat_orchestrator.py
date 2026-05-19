@@ -8,8 +8,10 @@ from pydantic import BaseModel, Field, ValidationError
 from app.llm.openai_client import stream_chat_completion_text
 from app.models import Task
 from app.services.category_guess import guess_category
+from app.services.entity_resolution import try_resolve_followup
 from app.services.rbac import allowed_tools_for_role
 from app.services.task_workflow import assert_status_transition
+from app.services.thread_manager import ThreadManager, api_thread_key
 from app.validation.json_validator import validate_chat_planner_output
 from app.validation.policy_engine import enforce_policies
 
@@ -111,18 +113,26 @@ def _api_key_header() -> dict[str, str]:
 
 
 def _chat_planner_openai_payload(
-    message: str, identity_ctx: dict, tool_registry: dict, source: str, conversation_id: str | None
+    message: str,
+    identity_ctx: dict,
+    tool_registry: dict,
+    source: str,
+    conversation_id: str | None,
+    thread_context: dict | None = None,
 ) -> dict:
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
     now_iso = datetime.now(timezone.utc).isoformat()
     system_text = (
         "You are a strict planner. Output JSON only with keys: "
         "tool_name, arguments, confidence, missing_required, clarification_question. "
-        "Pick one tool from registry. Do not hallucinate fields."
+        "Pick one tool from registry. Do not hallucinate fields. "
+        "When thread_context.last_task_id is set and the user refers to 'that task' or 'it', "
+        "use update_task or delete_task with that task_id — do not invent a new task."
     )
     user_text = (
         f"now={now_iso}\nsource={source}\nconversation_id={conversation_id}\n"
         f"identity={json.dumps(identity_ctx)}\n"
+        f"thread_context={json.dumps(thread_context or {})}\n"
         f"tool_registry={json.dumps(tool_registry)}\n"
         f"request={message}"
     )
@@ -145,8 +155,11 @@ async def _llm_plan_async(
     tool_registry: dict,
     source: str,
     conversation_id: str | None,
+    thread_context: dict | None = None,
 ):
-    payload = _chat_planner_openai_payload(message, identity_ctx, tool_registry, source, conversation_id)
+    payload = _chat_planner_openai_payload(
+        message, identity_ctx, tool_registry, source, conversation_id, thread_context
+    )
     response = await client.post(
         "https://api.openai.com/v1/chat/completions",
         headers=_api_key_header(),
@@ -164,7 +177,13 @@ async def _llm_plan_async(
 
 
 def _complete_after_plan(
-    planner_output: PlannerOutput, raw_output: dict, identity_ctx: dict, current_user, db
+    planner_output: PlannerOutput,
+    raw_output: dict,
+    identity_ctx: dict,
+    current_user,
+    db,
+    *,
+    allow_compact_done_transition: bool = False,
 ):
     if planner_output.missing_required:
         return {
@@ -189,7 +208,13 @@ def _complete_after_plan(
     except (ValidationError, ValueError) as exc:
         raise ValueError(f"validation failed: {exc}") from exc
     enforce_policies(_policy_context(identity_ctx), planner_output.tool_name, planner_output.arguments)
-    result = _execute(planner_output.tool_name, validated_args, current_user, db)
+    result = _execute(
+        planner_output.tool_name,
+        validated_args,
+        current_user,
+        db,
+        allow_compact_done_transition=allow_compact_done_transition,
+    )
     return {
         "status": "executed",
         "result": result,
@@ -199,7 +224,7 @@ def _complete_after_plan(
     }
 
 
-def _execute(tool_name: str, args, current_user, db):
+def _execute(tool_name: str, args, current_user, db, *, allow_compact_done_transition: bool = False):
     if tool_name == "create_task":
         category = args.category if args.category in VALID_CATEGORY else None
         if category is None:
@@ -228,9 +253,13 @@ def _execute(tool_name: str, args, current_user, db):
         if args.due_date is not None:
             task.due_date = args.due_date
         if args.status is not None:
-            assert_status_transition(task.status, args.status)
-            task.status = args.status
-            if args.status == "done":
+            target = args.status
+            if allow_compact_done_transition and target == "done" and task.status == "todo":
+                assert_status_transition(task.status, "in_progress")
+                task.status = "in_progress"
+            assert_status_transition(task.status, target)
+            task.status = target
+            if target == "done":
                 task.completed_at = datetime.now(timezone.utc)
             elif task.completed_at is not None:
                 task.completed_at = None
@@ -257,10 +286,93 @@ async def orchestrate_chat(
 ):
     identity_ctx = _build_identity_context(current_user)
     tool_registry = _chat_tool_registry_for_user(current_user)
-    planner_output, raw_output = await _llm_plan_async(
-        http_client, message, identity_ctx, tool_registry, source, conversation_id
+
+    thread_row = None
+    thread_mgr = None
+    if conversation_id:
+        thread_mgr = ThreadManager(db, current_user.id)
+        thread_row = thread_mgr.load(api_thread_key(current_user.id, conversation_id))
+        thread_mgr.add_turn(thread_row, "user", message)
+
+    thread_context = thread_mgr.planner_context(thread_row) if thread_mgr else None
+    last_task_id = thread_context.get("last_task_id") if thread_context else None
+
+    followup = try_resolve_followup(message, last_task_id)
+    if followup is not None:
+        raw_output = followup.model_dump()
+        result = _complete_after_plan(
+            followup,
+            raw_output,
+            identity_ctx,
+            current_user,
+            db,
+            allow_compact_done_transition=True,
+        )
+    else:
+        planner_output, raw_output = await _llm_plan_async(
+            http_client,
+            message,
+            identity_ctx,
+            tool_registry,
+            source,
+            conversation_id,
+            thread_context,
+        )
+        result = _complete_after_plan(planner_output, raw_output, identity_ctx, current_user, db)
+
+    if thread_mgr and thread_row is not None:
+        thread_mgr.record_execution_result(thread_row, result)
+        thread_mgr.add_turn(thread_row, "assistant", json.dumps(result, default=str)[:2000])
+
+    return result
+
+
+def orchestrate_clarify(
+    conversation_id: str,
+    answer: str,
+    current_user,
+    db,
+):
+    """Resume a thread after clarification_required using stored pending_json."""
+    thread_mgr = ThreadManager(db, current_user.id)
+    thread_row = thread_mgr.load(api_thread_key(current_user.id, conversation_id))
+    pending = thread_mgr.get_pending(thread_row)
+    if not pending:
+        raise ValueError("no pending clarification for this conversation")
+
+    planner_data = dict(pending.get("planner_output") or {})
+    tool_name = planner_data.get("tool_name")
+    if not tool_name:
+        raise ValueError("pending clarification is missing tool_name")
+
+    arguments = dict(planner_data.get("arguments") or {})
+    missing = list(planner_data.get("missing_required") or [])
+    if missing:
+        field = missing.pop(0)
+        value = answer.strip()
+        if field == "due_date":
+            try:
+                normalized = value.replace("Z", "+00:00") if value.endswith("Z") else value
+                arguments[field] = datetime.fromisoformat(normalized)
+            except ValueError as exc:
+                raise ValueError(f"invalid due_date: {value}") from exc
+        else:
+            arguments[field] = value
+
+    planner_output = PlannerOutput(
+        tool_name=tool_name,
+        arguments=arguments,
+        confidence=max(float(planner_data.get("confidence", 0.5)), 0.7),
+        missing_required=missing,
+        clarification_question=None,
     )
-    return _complete_after_plan(planner_output, raw_output, identity_ctx, current_user, db)
+    identity_ctx = _build_identity_context(current_user)
+    raw_output = planner_output.model_dump()
+    result = _complete_after_plan(planner_output, raw_output, identity_ctx, current_user, db)
+    thread_mgr.add_turn(thread_row, "user", f"[clarify] {answer}")
+    thread_mgr.record_execution_result(thread_row, result)
+    thread_mgr.add_turn(thread_row, "assistant", json.dumps(result, default=str)[:2000])
+    return result
 
 
 async def orchestrate_chat_stream(
@@ -274,8 +386,33 @@ async def orchestrate_chat_stream(
     """SSE-style stream: start → planner_token chunks → final result object."""
     identity_ctx = _build_identity_context(current_user)
     tool_registry = _chat_tool_registry_for_user(current_user)
+    thread_row = None
+    thread_mgr = None
+    if conversation_id:
+        thread_mgr = ThreadManager(db, current_user.id)
+        thread_row = thread_mgr.load(api_thread_key(current_user.id, conversation_id))
+        thread_mgr.add_turn(thread_row, "user", message)
+    thread_context = thread_mgr.planner_context(thread_row) if thread_mgr else None
+
     yield {"event": "start", "identity": identity_ctx}
-    payload = _chat_planner_openai_payload(message, identity_ctx, tool_registry, source, conversation_id)
+    followup = try_resolve_followup(message, (thread_context or {}).get("last_task_id"))
+    if followup is not None:
+        result = _complete_after_plan(
+            followup,
+            followup.model_dump(),
+            identity_ctx,
+            current_user,
+            db,
+            allow_compact_done_transition=True,
+        )
+        if thread_mgr and thread_row is not None:
+            thread_mgr.record_execution_result(thread_row, result)
+        yield {"event": "result", **result}
+        return
+
+    payload = _chat_planner_openai_payload(
+        message, identity_ctx, tool_registry, source, conversation_id, thread_context
+    )
     buf: list[str] = []
     async for delta in stream_chat_completion_text(http_client, payload):
         buf.append(delta)
@@ -288,4 +425,7 @@ async def orchestrate_chat_stream(
         raise ValueError("invalid JSON from planner") from exc
     planner_output = validate_chat_planner_output(parsed, tool_registry=tool_registry)
     result = _complete_after_plan(planner_output, parsed, identity_ctx, current_user, db)
+    if thread_mgr and thread_row is not None:
+        thread_mgr.record_execution_result(thread_row, result)
+        thread_mgr.add_turn(thread_row, "assistant", json.dumps(result, default=str)[:2000])
     yield {"event": "result", **result}
