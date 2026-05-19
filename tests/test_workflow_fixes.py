@@ -74,7 +74,9 @@ def test_abandoned_claim_is_reclaimed_on_retry():
 
 
 def test_chat_employee_cannot_delete(client, monkeypatch):
-    async def fake_plan(client, message, identity_ctx, tool_registry, source, conversation_id):
+    async def fake_plan(
+        client, message, identity_ctx, tool_registry, source, conversation_id, thread_context=None
+    ):
         from app.services.chat_orchestrator import PlannerOutput
 
         due = datetime.now(timezone.utc) + timedelta(days=2)
@@ -126,7 +128,9 @@ def test_chat_update_respects_status_workflow(client, monkeypatch):
     )
     task_id = create.json()["id"]
 
-    async def fake_plan(client, message, identity_ctx, tool_registry, source, conversation_id):
+    async def fake_plan(
+        client, message, identity_ctx, tool_registry, source, conversation_id, thread_context=None
+    ):
         from app.services.chat_orchestrator import PlannerOutput
 
         parsed = {
