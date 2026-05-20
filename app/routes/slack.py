@@ -305,7 +305,12 @@ async def _orchestrate_slack_message_after_user_map(
                 body["slack_delivery"] = slack_delivery
             return body
         with recorder.span("policy"):
-            enforce_policies(identity_context, validated_plan.tool, validated_plan.arguments)
+            enforce_policies(
+                identity_context,
+                validated_plan.tool,
+                validated_plan.arguments,
+                db=db,
+            )
     except PermissionError as exc:
         slack_delivery = await _post_slack_user_message(
             http_client,

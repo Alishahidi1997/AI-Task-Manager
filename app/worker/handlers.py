@@ -81,6 +81,23 @@ async def _run_chat_job(message: dict) -> dict:
                 db=db,
                 http_client=client,
             )
+        if result.get("status") == "policy_rejected":
+            audit_id = _save_chat_audit(
+                db,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                request_text=request_text,
+                result=result,
+            )
+            if job_row:
+                mark_job_completed(
+                    db,
+                    job_row,
+                    result={**result, "audit_id": audit_id},
+                    audit_log_id=audit_id,
+                )
+            return {**result, "audit_id": audit_id}
+
         audit_id = _save_chat_audit(
             db,
             user_id=user_id,

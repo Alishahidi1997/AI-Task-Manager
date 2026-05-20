@@ -207,7 +207,21 @@ def _complete_after_plan(
         validated_args = _validate_tool_output(planner_output)
     except (ValidationError, ValueError) as exc:
         raise ValueError(f"validation failed: {exc}") from exc
-    enforce_policies(_policy_context(identity_ctx), planner_output.tool_name, planner_output.arguments)
+    try:
+        enforce_policies(
+            _policy_context(identity_ctx),
+            planner_output.tool_name,
+            planner_output.arguments,
+            db=db,
+        )
+    except PermissionError as exc:
+        return {
+            "status": "policy_rejected",
+            "reason": str(exc),
+            "planner_output": planner_output.model_dump(),
+            "identity": identity_ctx,
+            "raw_planner_output": raw_output,
+        }
     result = _execute(
         planner_output.tool_name,
         validated_args,

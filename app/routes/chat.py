@@ -93,19 +93,6 @@ async def chat(
         db.commit()
         db.refresh(row)
         return {"audit_id": row.id, **result}
-    except PermissionError as exc:
-        row = AuditLog(
-            request_text=payload.message,
-            tool_name=None,
-            arguments=None,
-            validation_result="failed",
-            execution_result="denied",
-            user_id=current_user.id,
-            tenant_id=tenant_id,
-        )
-        db.add(row)
-        db.commit()
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
         row = AuditLog(
             request_text=payload.message,
@@ -200,32 +187,6 @@ async def chat_stream(
             db.rollback()
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
-
-
-@router.get("/audit/{audit_id}")
-def get_audit_log(
-    audit_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    row = (
-        db.query(AuditLog)
-        .filter(AuditLog.id == audit_id, AuditLog.user_id == current_user.id)
-        .first()
-    )
-    if not row:
-        raise HTTPException(status_code=404, detail="audit log not found")
-    return {
-        "id": row.id,
-        "request_text": row.request_text,
-        "tool_name": row.tool_name,
-        "arguments": row.arguments,
-        "validation_result": row.validation_result,
-        "execution_result": row.execution_result,
-        "user_id": row.user_id,
-        "tenant_id": row.tenant_id,
-        "created_at": row.created_at,
-    }
 
 
 @router.post("/clarify")
