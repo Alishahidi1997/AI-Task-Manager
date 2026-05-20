@@ -96,7 +96,10 @@ def test_chat_employee_cannot_delete(client, monkeypatch):
         headers=headers,
         json={"message": "delete task 1", "source": "pytest"},
     )
-    assert response.status_code == 403
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "policy_rejected"
+    assert "delete" in body["reason"].lower()
 
 
 def test_insights_snapshot_empty_user(client):

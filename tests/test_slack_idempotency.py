@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from app.auth import hash_password
 from app.database import SessionLocal
-from app.models import AuditLog, User
+from app.models import AuditLog, SlackOrchestrationTrace, User
 from app.services.slack_idempotency import claim_slack_event, slack_event_id_from_payload
 from app.validation.json_validator import PlannerOutput
 
@@ -69,7 +69,7 @@ def test_slack_duplicate_delivery_skips_second_execution(mock_plan, client, monk
         "tool": "create_task",
         "arguments": {
             "title": "Idempotent task",
-            "assignee": "Alex",
+            "assignee": "idempotency@example.com",
             "due_date": due,
         },
         "confidence": 0.95,
@@ -83,7 +83,7 @@ def test_slack_duplicate_delivery_skips_second_execution(mock_plan, client, monk
         "event": {
             "type": "message",
             "user": "U_IDEMPOTENCY_TEST",
-            "text": "create a task for Alex",
+            "text": "create a task for idempotency@example.com",
             "channel": "C_IDEM",
             "ts": "999.001",
         },
@@ -112,6 +112,15 @@ def test_slack_duplicate_delivery_skips_second_execution(mock_plan, client, monk
         )
         assert len(rows) == 1
         assert rows[0].execution_result == "executed"
+        trace = (
+            db.query(SlackOrchestrationTrace)
+            .filter(SlackOrchestrationTrace.audit_log_id == rows[0].id)
+            .first()
+        )
+        assert trace is not None
+        assert trace.outcome == "executed"
+        assert first_body.get("audit_id") == rows[0].id
+        assert first_body.get("trace", {}).get("trace_id") == trace.trace_id
     finally:
         db.close()
 

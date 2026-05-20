@@ -65,3 +65,28 @@ def auth_headers(client: TestClient, email: str, password: str) -> dict[str, str
     assert response.status_code == 200, response.text
     token = response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
+
+
+def auth_headers_with_role(
+    client: TestClient,
+    email: str,
+    password: str,
+    *,
+    role: str = "employee",
+    tenant_id: str = "tenant-test",
+) -> dict[str, str]:
+    headers = auth_headers(client, email, password)
+    from app.database import SessionLocal
+    from app.models import User
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == email).first()
+        assert user is not None
+        user.role = role
+        user.tenant_id = tenant_id
+        db.add(user)
+        db.commit()
+    finally:
+        db.close()
+    return headers
