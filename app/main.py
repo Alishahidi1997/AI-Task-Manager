@@ -6,7 +6,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth import hash_password
+from app.middleware.prometheus_middleware import PrometheusMiddleware
 from app.middleware.request_logging import RequestLoggingMiddleware
+from app.routes.metrics import router as metrics_router
 from app.database import SessionLocal, engine, init_db
 from app.models import Task, User
 from app.routes.ai import router as ai_router
@@ -94,6 +96,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(PrometheusMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 app.include_router(tasks_router)
 app.include_router(summary_router)
@@ -106,6 +109,7 @@ app.include_router(chat_router)
 app.include_router(audit_router)
 app.include_router(jobs_router)
 app.include_router(slack_router)
+app.include_router(metrics_router)
 
 
 @app.get("/")
