@@ -6,6 +6,7 @@ import httpx
 from pydantic import BaseModel, Field, ValidationError
 
 from app.llm.openai_client import stream_chat_completion_text
+from app.llm.openai_transport import post_chat_completion_async
 from app.models import Task
 from app.services.category_guess import guess_category
 from app.services.entity_resolution import try_resolve_followup
@@ -160,13 +161,7 @@ async def _llm_plan_async(
     payload = _chat_planner_openai_payload(
         message, identity_ctx, tool_registry, source, conversation_id, thread_context
     )
-    response = await client.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers=_api_key_header(),
-        json=payload,
-    )
-    response.raise_for_status()
-    data = response.json()
+    data = await post_chat_completion_async(client, payload)
     content = (data.get("choices") or [{}])[0].get("message", {}).get("content") or "{}"
     try:
         parsed = json.loads(content)

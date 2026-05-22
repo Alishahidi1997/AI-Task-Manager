@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import httpx
-
 from app.evals.models import GoldenCase
 from app.llm.openai_client import plan_tool_call
+from app.llm.openai_transport import post_chat_completion_sync
 from app.orchestration.prompt_builder import build_planner_system_prompt
 from app.orchestration.tool_registry import filter_tools, tool_schema_map
 from app.services.chat_orchestrator import _chat_planner_openai_payload, _chat_tool_registry_for_user
@@ -37,20 +36,10 @@ def live_planner(case: GoldenCase) -> dict:
             conversation_id=None,
             thread_context=None,
         )
-        with httpx.Client(timeout=45.0) as client:
-            api_key = __import__("os").environ.get("OPENAI_API_KEY", "").strip()
-            response = client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-            response.raise_for_status()
-            content = (response.json().get("choices") or [{}])[0].get("message", {}).get("content") or "{}"
         import json
 
+        data = post_chat_completion_sync(payload)
+        content = (data.get("choices") or [{}])[0].get("message", {}).get("content") or "{}"
         return json.loads(content)
 
     tools = filter_tools(allowed_tools_for_role(case.role))
