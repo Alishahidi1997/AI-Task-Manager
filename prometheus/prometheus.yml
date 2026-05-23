@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: smart-task-api
+    metrics_path: /metrics
+    static_configs:
+      # API running on host: uvicorn app.main:app --reload --port 8000
+      - targets: ["host.docker.internal:8000"]
