@@ -11,7 +11,8 @@ from fastapi import HTTPException
 
 from app.database import SessionLocal
 from app.models import AuditLog, User
-from app.queue.config import JOB_CHAT_ORCHESTRATION, JOB_SLACK_ORCHESTRATION
+from app.queue.config import JOB_CHAT_ORCHESTRATION, JOB_DAILY_SUMMARY, JOB_SLACK_ORCHESTRATION
+from app.services.daily_summary_job import run_daily_summary_for_user
 from app.services.audit_utils import audit_validation_result
 from app.services.chat_orchestrator import orchestrate_chat
 from app.services.llm_jobs import mark_job_completed, mark_job_failed, mark_job_running
@@ -193,6 +194,34 @@ async def _run_slack_job(message: dict) -> dict:
         db.close()
 
 
+def _run_daily_summary_job(message: dict) -> dict:
+    job_id = message["job_id"]
+    user_id = message["user_id"]
+    db = SessionLocal()
+    job_row = None
+    try:
+        from app.models import LLMJob
+
+        user = db.query(User).filter(User.id == user_id).first()
+        if user is None:
+            raise ValueError(f"user {user_id} not found")
+
+        job_row = db.query(LLMJob).filter(LLMJob.job_id == job_id).first()
+        if job_row:
+            mark_job_running(db, job_row)
+
+        result = run_daily_summary_for_user(db, user)
+        if job_row:
+            mark_job_completed(db, job_row, result=result)
+        return result
+    except Exception as exc:
+        if job_row:
+            mark_job_failed(db, job_row, error=str(exc))
+        raise
+    finally:
+        db.close()
+
+
 def process_llm_job_message(message: dict) -> None:
     """Sync entrypoint for the RabbitMQ consumer."""
     job_type = message.get("job_type")
@@ -202,6 +231,8 @@ def process_llm_job_message(message: dict) -> None:
             asyncio.run(_run_chat_job(message))
         elif job_type == JOB_SLACK_ORCHESTRATION:
             asyncio.run(_run_slack_job(message))
+        elif job_type == JOB_DAILY_SUMMARY:
+            _run_daily_summary_job(message)
         else:
             raise ValueError(f"unsupported job_type '{job_type}'")
         logger.info("completed job_id=%s", message.get("job_id"))
