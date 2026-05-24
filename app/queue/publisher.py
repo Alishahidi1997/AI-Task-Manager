@@ -6,7 +6,15 @@ import json
 
 import pika
 
-from app.queue.config import EXCHANGE_NAME, QUEUE_BATCH, QUEUE_ORCHESTRATION, ROUTING_BATCH, ROUTING_ORCHESTRATION, rabbitmq_url
+from app.queue.config import (
+    EXCHANGE_NAME,
+    JOB_DAILY_SUMMARY,
+    QUEUE_BATCH,
+    QUEUE_ORCHESTRATION,
+    ROUTING_BATCH,
+    ROUTING_ORCHESTRATION,
+    rabbitmq_url,
+)
 
 
 def _orchestration_queue() -> str:
@@ -25,7 +33,7 @@ def _ensure_topology(channel: pika.channel.Channel) -> None:
 
 def publish_llm_job(message: dict, *, job_type: str) -> None:
     """Publish a job dict (must include job_id). Raises on broker failure."""
-    routing_key = ROUTING_BATCH if job_type == "daily_summary" else ROUTING_ORCHESTRATION
+    routing_key = ROUTING_BATCH if job_type == JOB_DAILY_SUMMARY else ROUTING_ORCHESTRATION
     body = json.dumps(message, ensure_ascii=True).encode("utf-8")
     params = pika.URLParameters(rabbitmq_url())
     connection = pika.BlockingConnection(params)
