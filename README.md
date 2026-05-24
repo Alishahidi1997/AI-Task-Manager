@@ -74,7 +74,7 @@ The model suggests, the system decides.
 
 ### Insights Engine
 
-- Productivity tracking (completion patterns, delays)
+- Productivity tracking (completion patterns, delays)c
 - Priority analysis (overdue and high-risk tasks)
 - Anomaly detection across user behavior
 - Next-action recommendations
