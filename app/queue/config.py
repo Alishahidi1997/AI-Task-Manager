@@ -9,6 +9,17 @@ ROUTING_BATCH = "batch.low"
 JOB_SLACK_ORCHESTRATION = "slack_orchestration"
 JOB_CHAT_ORCHESTRATION = "chat_orchestration"
 JOB_DAILY_SUMMARY = "daily_summary"
+JOB_CHAT_STREAM = "chat_planner_stream"
+
+
+def chat_stream_queue_enabled() -> bool:
+    """Queue /chat/stream when RabbitMQ + Redis are available."""
+    if not llm_queue_enabled():
+        return False
+    if not os.getenv("REDIS_URL", "").strip():
+        return False
+    flag = os.getenv("CHAT_STREAM_QUEUE_ENABLED", "true").strip().lower()
+    return flag not in {"0", "false", "no", "off"}
 
 
 def rabbitmq_url() -> str:
