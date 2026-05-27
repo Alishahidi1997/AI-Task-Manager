@@ -10,9 +10,9 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.deps import get_http_client, get_redis
 from app.models import AuditLog, User
-from app.queue.config import llm_queue_enabled
+from app.queue.config import chat_stream_queue_enabled, llm_queue_enabled
 from app.services.chat_orchestrator import orchestrate_chat, orchestrate_chat_stream, orchestrate_clarify
-from app.services.llm_queue_enqueue import enqueue_chat_orchestration
+from app.services.llm_queue_enqueue import enqueue_chat_orchestration, enqueue_chat_stream
 from app.services.audit_utils import audit_validation_result
 from app.services.rate_limit import bump_stat, enforce_chat_rate_limit
 
@@ -120,6 +120,31 @@ async def chat_stream(
     tenant_id = f"user-{current_user.id}"
     await bump_stat(redis, "stats:chat_stream_requests")
     await enforce_chat_rate_limit(redis, current_user.id)
+
+    if chat_stream_queue_enabled() and redis is not None:
+        try:
+            job_id = await enqueue_chat_stream(
+                db,
+                user=current_user,
+                message=payload.message,
+                source=payload.source,
+                conversation_id=payload.conversation_id,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"could not enqueue chat stream job: {exc}",
+            ) from exc
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "status": "accepted",
+                "job_id": job_id,
+                "stream_url": f"/jobs/{job_id}/stream",
+                "poll_url": f"/jobs/{job_id}",
+                "message": "Chat stream queued; open stream_url for SSE or poll GET /jobs/{job_id}.",
+            },
+        )
 
     async def event_generator():
         final_result = None

@@ -8,7 +8,12 @@ import hashlib
 from sqlalchemy.orm import Session
 
 from app.models import LLMJob, User
-from app.queue.config import JOB_CHAT_ORCHESTRATION, JOB_DAILY_SUMMARY, JOB_SLACK_ORCHESTRATION
+from app.queue.config import (
+    JOB_CHAT_ORCHESTRATION,
+    JOB_CHAT_STREAM,
+    JOB_DAILY_SUMMARY,
+    JOB_SLACK_ORCHESTRATION,
+)
 from app.queue.publisher import publish_llm_job
 from app.services.llm_jobs import build_queue_message, create_llm_job
 
@@ -16,6 +21,35 @@ from app.services.llm_jobs import build_queue_message, create_llm_job
 def _chat_idempotency_key(conversation_id: str | None, message: str) -> str:
     base = f"{conversation_id or 'none'}:{message.strip()}"
     return "chat:" + hashlib.sha256(base.encode("utf-8")).hexdigest()[:32]
+
+
+async def enqueue_chat_stream(
+    db: Session,
+    *,
+    user: User,
+    message: str,
+    source: str,
+    conversation_id: str | None,
+) -> str:
+    tenant_id = f"user-{user.id}"
+    payload = {
+        "message": message,
+        "source": source,
+        "conversation_id": conversation_id,
+    }
+    row = create_llm_job(
+        db,
+        job_type=JOB_CHAT_STREAM,
+        user_id=user.id,
+        tenant_id=tenant_id,
+        request_text=message,
+        channel="api",
+        payload=payload,
+        idempotency_key=_chat_idempotency_key(conversation_id, f"stream:{message}"),
+    )
+    message_body = build_queue_message(row)
+    await asyncio.to_thread(publish_llm_job, message_body, job_type=JOB_CHAT_STREAM)
+    return row.job_id
 
 
 async def enqueue_chat_orchestration(

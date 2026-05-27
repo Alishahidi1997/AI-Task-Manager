@@ -11,7 +11,14 @@ from fastapi import HTTPException
 
 from app.database import SessionLocal
 from app.models import AuditLog, User
-from app.queue.config import JOB_CHAT_ORCHESTRATION, JOB_DAILY_SUMMARY, JOB_SLACK_ORCHESTRATION
+from app.queue.config import (
+    JOB_CHAT_ORCHESTRATION,
+    JOB_CHAT_STREAM,
+    JOB_DAILY_SUMMARY,
+    JOB_SLACK_ORCHESTRATION,
+)
+from app.services.chat_stream_buffer import append_stream_event, set_stream_status
+from app.services.chat_orchestrator import orchestrate_chat_stream
 from app.services.daily_summary_job import run_daily_summary_for_user
 from app.services.audit_utils import audit_validation_result
 from app.services.chat_orchestrator import orchestrate_chat
@@ -194,6 +201,89 @@ async def _run_slack_job(message: dict) -> dict:
         db.close()
 
 
+async def _run_chat_stream_job_async(message: dict) -> dict:
+    import os
+
+    import redis.asyncio as redis_async
+
+    job_id = message["job_id"]
+    user_id = message["user_id"]
+    tenant_id = message["tenant_id"]
+    inner = message.get("payload") or {}
+    request_text = message.get("request_text", "")
+
+    redis_url = os.getenv("REDIS_URL", "").strip()
+    if not redis_url:
+        raise RuntimeError("REDIS_URL is required for chat stream jobs")
+
+    redis = redis_async.from_url(redis_url, decode_responses=True)
+    db = SessionLocal()
+    job_row = None
+    final_result = None
+    try:
+        from app.models import LLMJob
+
+        user = db.query(User).filter(User.id == user_id).first()
+        if user is None:
+            raise ValueError(f"user {user_id} not found")
+
+        job_row = db.query(LLMJob).filter(LLMJob.job_id == job_id).first()
+        if job_row:
+            mark_job_running(db, job_row)
+
+        await set_stream_status(redis, job_id, "running")
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(45.0)) as client:
+            async for evt in orchestrate_chat_stream(
+                inner.get("message", request_text),
+                source=inner.get("source", "api"),
+                conversation_id=inner.get("conversation_id"),
+                current_user=user,
+                db=db,
+                http_client=client,
+            ):
+                await append_stream_event(redis, job_id, evt)
+                if evt.get("event") == "result":
+                    final_result = evt
+
+        await append_stream_event(redis, job_id, {"event": "stream_end"})
+        await set_stream_status(redis, job_id, "completed")
+
+        if final_result is None:
+            raise ValueError("stream ended without result event")
+
+        planner = final_result.get("planner_output") or {}
+        audit_id = _save_chat_audit(
+            db,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            request_text=request_text,
+            result={k: v for k, v in final_result.items() if k != "event"},
+        )
+        if job_row:
+            mark_job_completed(
+                db,
+                job_row,
+                result={**{k: v for k, v in final_result.items() if k != "event"}, "audit_id": audit_id},
+                audit_log_id=audit_id,
+            )
+        return {**{k: v for k, v in final_result.items() if k != "event"}, "audit_id": audit_id}
+    except Exception as exc:
+        await append_stream_event(redis, job_id, {"event": "error", "detail": str(exc)[:2000]})
+        await append_stream_event(redis, job_id, {"event": "stream_end"})
+        await set_stream_status(redis, job_id, "failed")
+        if job_row:
+            mark_job_failed(db, job_row, error=str(exc))
+        raise
+    finally:
+        await redis.aclose()
+        db.close()
+
+
+def _run_chat_stream_job(message: dict) -> dict:
+    return asyncio.run(_run_chat_stream_job_async(message))
+
+
 def _run_daily_summary_job(message: dict) -> dict:
     job_id = message["job_id"]
     user_id = message["user_id"]
@@ -229,6 +319,8 @@ def process_llm_job_message(message: dict) -> None:
     try:
         if job_type == JOB_CHAT_ORCHESTRATION:
             asyncio.run(_run_chat_job(message))
+        elif job_type == JOB_CHAT_STREAM:
+            _run_chat_stream_job(message)
         elif job_type == JOB_SLACK_ORCHESTRATION:
             asyncio.run(_run_slack_job(message))
         elif job_type == JOB_DAILY_SUMMARY:
