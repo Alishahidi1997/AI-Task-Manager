@@ -122,6 +122,8 @@ class ThreadManager:
         status = result.get("status")
         if status == "executed":
             task_id = (result.get("result") or {}).get("task_id")
+            if task_id is None:
+                task_id = result.get("task_id")
             if task_id is not None:
                 self.set_last_task_id(row, int(task_id))
             self.set_pending(row, None)

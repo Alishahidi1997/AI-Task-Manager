@@ -123,8 +123,12 @@ def execute_slack_tool(*, tool: str, arguments: dict, user: User, db: Session) -
         if args.status is not None:
             if args.status not in VALID_STATUS:
                 raise ValueError("invalid status")
-            assert_status_transition(task.status, args.status)
-            task.status = args.status
+            target = args.status
+            if target == "done" and task.status == "todo":
+                assert_status_transition(task.status, "in_progress")
+                task.status = "in_progress"
+            assert_status_transition(task.status, target)
+            task.status = target
             if args.status == "done":
                 task.completed_at = datetime.now(timezone.utc)
             elif task.completed_at is not None:
