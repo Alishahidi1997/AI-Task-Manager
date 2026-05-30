@@ -282,6 +282,32 @@ export function hasAuthToken() {
   return Boolean(authToken);
 }
 
+type JobPollResponse<T> = {
+  status: string;
+  result?: T;
+  error?: string | null;
+};
+
+type QueuedAcceptResponse = {
+  status: "accepted";
+  job_id: string;
+  poll_url: string;
+};
+
+async function pollJobResult<T>(jobId: string, maxAttempts = 60, intervalMs = 400): Promise<T> {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const status = await request<JobPollResponse<T>>(`/jobs/${jobId}`);
+    if (status.status === "completed" && status.result !== undefined) {
+      return status.result;
+    }
+    if (status.status === "failed") {
+      throw new Error(status.error ?? "background job failed");
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error("background job timed out");
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers ?? {});
   if (authToken) {
@@ -294,7 +320,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (response.status === 204) {
     return undefined as T;
   }
-  return (await response.json()) as T;
+  const body = (await response.json()) as T | QueuedAcceptResponse;
+  if (response.status === 202 && body && typeof body === "object" && "job_id" in body) {
+    return pollJobResult<T>((body as QueuedAcceptResponse).job_id);
+  }
+  return body as T;
 }
 
 export async function listTasks(filters: {

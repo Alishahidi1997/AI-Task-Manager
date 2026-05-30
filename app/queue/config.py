@@ -10,6 +10,22 @@ JOB_SLACK_ORCHESTRATION = "slack_orchestration"
 JOB_CHAT_ORCHESTRATION = "chat_orchestration"
 JOB_DAILY_SUMMARY = "daily_summary"
 JOB_CHAT_STREAM = "chat_planner_stream"
+JOB_AI_PARSE = "ai_parse"
+JOB_AI_PLAN = "ai_plan"
+JOB_AI_AGENT = "ai_agent"
+
+BATCH_JOB_TYPES = frozenset(
+    {
+        JOB_DAILY_SUMMARY,
+        JOB_AI_PARSE,
+        JOB_AI_PLAN,
+        JOB_AI_AGENT,
+    }
+)
+
+
+def is_batch_job(job_type: str) -> bool:
+    return job_type in BATCH_JOB_TYPES
 
 
 def chat_stream_queue_enabled() -> bool:

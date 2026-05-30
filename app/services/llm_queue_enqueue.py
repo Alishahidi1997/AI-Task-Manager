@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from datetime import date
 
 from sqlalchemy.orm import Session
 
 from app.models import LLMJob, User
 from app.queue.config import (
+    JOB_AI_AGENT,
+    JOB_AI_PARSE,
+    JOB_AI_PLAN,
     JOB_CHAT_ORCHESTRATION,
     JOB_CHAT_STREAM,
     JOB_DAILY_SUMMARY,
@@ -152,6 +156,85 @@ def enqueue_daily_summary_for_user(db: Session, user: User, *, day: date | None 
     )
     message_body = build_queue_message(row)
     publish_llm_job(message_body, job_type=JOB_DAILY_SUMMARY)
+    return row.job_id
+
+
+def _ai_idempotency_key(user_id: int, job_kind: str, text: str) -> str:
+    base = f"{user_id}:{job_kind}:{text.strip()}"
+    return f"ai:{job_kind}:" + hashlib.sha256(base.encode("utf-8")).hexdigest()[:32]
+
+
+async def enqueue_ai_parse(
+    db: Session,
+    *,
+    user: User,
+    text: str,
+    timezone: str | None,
+) -> str:
+    tenant_id = f"user-{user.id}"
+    payload = {"text": text, "timezone": timezone}
+    row = create_llm_job(
+        db,
+        job_type=JOB_AI_PARSE,
+        user_id=user.id,
+        tenant_id=tenant_id,
+        request_text=text,
+        channel="api",
+        payload=payload,
+        idempotency_key=_ai_idempotency_key(user.id, "parse", text),
+    )
+    message_body = build_queue_message(row)
+    await asyncio.to_thread(publish_llm_job, message_body, job_type=JOB_AI_PARSE)
+    return row.job_id
+
+
+async def enqueue_ai_plan(
+    db: Session,
+    *,
+    user: User,
+    text: str,
+    timezone: str | None,
+    horizon_days: int,
+) -> str:
+    tenant_id = f"user-{user.id}"
+    payload = {"text": text, "timezone": timezone, "horizon_days": horizon_days}
+    row = create_llm_job(
+        db,
+        job_type=JOB_AI_PLAN,
+        user_id=user.id,
+        tenant_id=tenant_id,
+        request_text=text,
+        channel="api",
+        payload=payload,
+        idempotency_key=_ai_idempotency_key(user.id, f"plan:{horizon_days}", text),
+    )
+    message_body = build_queue_message(row)
+    await asyncio.to_thread(publish_llm_job, message_body, job_type=JOB_AI_PLAN)
+    return row.job_id
+
+
+async def enqueue_ai_agent(
+    db: Session,
+    *,
+    user: User,
+    query: str,
+    timezone: str | None,
+    dry_run: bool,
+) -> str:
+    tenant_id = f"user-{user.id}"
+    payload = {"query": query, "timezone": timezone, "dry_run": dry_run}
+    row = create_llm_job(
+        db,
+        job_type=JOB_AI_AGENT,
+        user_id=user.id,
+        tenant_id=tenant_id,
+        request_text=query,
+        channel="api",
+        payload=payload,
+        idempotency_key=_ai_idempotency_key(user.id, f"agent:{dry_run}", query),
+    )
+    message_body = build_queue_message(row)
+    await asyncio.to_thread(publish_llm_job, message_body, job_type=JOB_AI_AGENT)
     return row.job_id
 
 

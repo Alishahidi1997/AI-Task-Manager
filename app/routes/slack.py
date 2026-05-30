@@ -12,6 +12,8 @@ from app.deps import get_http_client, get_redis
 from app.llm.openai_client import plan_tool_call_async
 from app.models import AuditLog, SlackOrchestrationTrace, User
 from app.orchestration.prompt_builder import build_planner_system_prompt
+from app.services.entity_resolution import apply_task_id_from_title, try_resolve_slack_followup
+from app.services.thread_manager import ThreadManager, slack_thread_key
 from app.orchestration.tool_registry import filter_tools, tool_schema_map
 from app.services.rbac import allowed_tools_for_role
 from app.services.slack_bot_client import chat_post_message, slack_bot_token
@@ -216,7 +218,19 @@ async def _orchestrate_slack_message_after_user_map(
         "tenant": user.tenant_id,
         "allowed_tools": allowed,
     }
-    planner_prompt = build_planner_system_prompt(identity_context, tools)
+    thread_mgr = ThreadManager(db, user.id)
+    thread_row = thread_mgr.load(
+        slack_thread_key(
+            user.id,
+            channel_id,
+            thread_ts=event.get("thread_ts"),
+            message_ts=str(ts) if ts is not None else None,
+        )
+    )
+    thread_mgr.add_turn(thread_row, "user", text)
+    thread_context = thread_mgr.planner_context(thread_row)
+    planner_prompt = build_planner_system_prompt(identity_context, tools, thread_context)
+
     normalized = {
         "slack_user_id": slack_user_id,
         "text": text,
@@ -249,14 +263,23 @@ async def _orchestrate_slack_message_after_user_map(
         )
 
     try:
-        with recorder.span("planner_llm"):
-            planner_raw = await plan_tool_call_async(http_client, planner_prompt, text)
+        followup_raw = try_resolve_slack_followup(text, thread_context.get("last_task_id"))
+        if followup_raw is not None:
+            planner_raw = followup_raw
+        else:
+            with recorder.span("planner_llm"):
+                planner_raw = await plan_tool_call_async(http_client, planner_prompt, text)
         with recorder.span("validation"):
             validated_plan = validate_planner_output(
                 planner_raw,
                 tool_schemas=tool_schema_map(),
                 allowed_tools=allowed,
             )
+            merged_args = apply_task_id_from_title(
+                db, user.id, validated_plan.tool, validated_plan.arguments, text
+            )
+            if merged_args != validated_plan.arguments:
+                validated_plan = validated_plan.model_copy(update={"arguments": merged_args})
         if validated_plan.missing_required or validated_plan.confidence < 0.35:
             clarify_q = validated_plan.clarification_question or (
                 f"Missing required: {', '.join(validated_plan.missing_required)}"
@@ -498,6 +521,17 @@ async def _orchestrate_slack_message_after_user_map(
         if slack_delivery is not None:
             body["slack_delivery"] = slack_delivery
         return body
+
+    thread_mgr.record_execution_result(
+        thread_row,
+        {"status": "executed", "result": {"task_id": exec_result.get("task_id")}},
+    )
+    thread_mgr.add_turn(
+        thread_row,
+        "assistant",
+        f"executed {validated_plan.tool} task_id={exec_result.get('task_id')}",
+        task_id=exec_result.get("task_id"),
+    )
 
     tool = validated_plan.tool
     tid = exec_result.get("task_id")

@@ -12,11 +12,16 @@ from fastapi import HTTPException
 from app.database import SessionLocal
 from app.models import AuditLog, User
 from app.queue.config import (
+    JOB_AI_AGENT,
+    JOB_AI_PARSE,
+    JOB_AI_PLAN,
     JOB_CHAT_ORCHESTRATION,
     JOB_CHAT_STREAM,
     JOB_DAILY_SUMMARY,
     JOB_SLACK_ORCHESTRATION,
 )
+from app.services.ai_agent import run_agent_command
+from app.services.ai_parse import parse_task_text, plan_task_text
 from app.services.chat_stream_buffer import append_stream_event, set_stream_status
 from app.services.chat_orchestrator import orchestrate_chat_stream
 from app.services.daily_summary_job import run_daily_summary_for_user
@@ -284,6 +289,90 @@ def _run_chat_stream_job(message: dict) -> dict:
     return asyncio.run(_run_chat_stream_job_async(message))
 
 
+def _run_ai_parse_job(message: dict) -> dict:
+    job_id = message["job_id"]
+    inner = message.get("payload") or {}
+    db = SessionLocal()
+    job_row = None
+    try:
+        from app.models import LLMJob
+
+        job_row = db.query(LLMJob).filter(LLMJob.job_id == job_id).first()
+        if job_row:
+            mark_job_running(db, job_row)
+        result = parse_task_text(inner.get("text", message.get("request_text", "")), inner.get("timezone"))
+        if job_row:
+            mark_job_completed(db, job_row, result=result)
+        return result
+    except Exception as exc:
+        if job_row:
+            mark_job_failed(db, job_row, error=str(exc))
+        raise
+    finally:
+        db.close()
+
+
+def _run_ai_plan_job(message: dict) -> dict:
+    job_id = message["job_id"]
+    inner = message.get("payload") or {}
+    db = SessionLocal()
+    job_row = None
+    try:
+        from app.models import LLMJob
+
+        job_row = db.query(LLMJob).filter(LLMJob.job_id == job_id).first()
+        if job_row:
+            mark_job_running(db, job_row)
+        horizon = int(inner.get("horizon_days", 7))
+        result = plan_task_text(
+            inner.get("text", message.get("request_text", "")),
+            inner.get("timezone"),
+            horizon,
+        )
+        if job_row:
+            mark_job_completed(db, job_row, result=result)
+        return result
+    except Exception as exc:
+        if job_row:
+            mark_job_failed(db, job_row, error=str(exc))
+        raise
+    finally:
+        db.close()
+
+
+def _run_ai_agent_job(message: dict) -> dict:
+    job_id = message["job_id"]
+    user_id = message["user_id"]
+    inner = message.get("payload") or {}
+    db = SessionLocal()
+    job_row = None
+    try:
+        from app.models import LLMJob, User
+
+        user = db.query(User).filter(User.id == user_id).first()
+        if user is None:
+            raise ValueError(f"user {user_id} not found")
+        job_row = db.query(LLMJob).filter(LLMJob.job_id == job_id).first()
+        if job_row:
+            mark_job_running(db, job_row)
+        result = run_agent_command(
+            inner.get("query", message.get("request_text", "")),
+            current_user=user,
+            db=db,
+            timezone_name=inner.get("timezone"),
+            dry_run=bool(inner.get("dry_run", True)),
+        )
+        if job_row:
+            mark_job_completed(db, job_row, result=result)
+        return result
+    except Exception as exc:
+        if job_row:
+            mark_job_failed(db, job_row, error=str(exc))
+        raise
+    finally:
+        db.close()
+
+
 def _run_daily_summary_job(message: dict) -> dict:
     job_id = message["job_id"]
     user_id = message["user_id"]
@@ -325,6 +414,12 @@ def process_llm_job_message(message: dict) -> None:
             asyncio.run(_run_slack_job(message))
         elif job_type == JOB_DAILY_SUMMARY:
             _run_daily_summary_job(message)
+        elif job_type == JOB_AI_PARSE:
+            _run_ai_parse_job(message)
+        elif job_type == JOB_AI_PLAN:
+            _run_ai_plan_job(message)
+        elif job_type == JOB_AI_AGENT:
+            _run_ai_agent_job(message)
         else:
             raise ValueError(f"unsupported job_type '{job_type}'")
         logger.info("completed job_id=%s", message.get("job_id"))

@@ -152,6 +152,9 @@ Copy `.env.example` to `.env` and adjust. CI/integration: set `POSTGRES_TEST_URL
 
 ### Optional: RabbitMQ for LLM orchestration (Phase 2 Epic 1.2)
 
+When `RABBITMQ_URL` is set, `/ai/parse-task`, `/ai/plan-task`, and `/ai/agent-command` return `202` with a `job_id` (batch queue). Poll `GET /jobs/{job_id}` or use the React client (auto-polls on 202).
+
+
 Offloads `/chat` and async Slack orchestration to a worker so the API does not hold OpenAI connections.
 
 ```bash
