@@ -1,5 +1,7 @@
 # Smart Task Tracker
 
+[![CI](https://github.com/Alishahidi1997/AI-Task-Manager/actions/workflows/ci.yml/badge.svg)](https://github.com/Alishahidi1997/AI-Task-Manager/actions/workflows/ci.yml)
+
 A production-style backend system that enables natural language task management while enforcing strict server-side validation, policy control, and full auditability.
 
 The LLM acts only as a planner. It suggests structured tool calls, while the backend validates, authorizes, executes, and logs all operations.
@@ -107,22 +109,23 @@ Unlike typical LLM wrapper applications:
 - Every action is validated before execution
 - All AI decisions are logged and traceable
 - The system treats AI as a planner, not an executor
+- Slack and `/chat` share one planner JSON shape (`tool_name` + `arguments`; legacy `tool` is normalized at validation)
 - Built with production failure modes in mind
 
 ---
 
 ## Phase 2 (implementation roadmap)
 
-Cursor-executable **Epics 1–4** with acceptance criteria, file targets, and Composer prompts live in **`project.md` → Phase 2: Production-Ready**.
+All **Epics 1–4** and stretch ops are implemented. Details and acceptance criteria live in **`project.md` → Phase 2: Production-Ready** (local design doc).
 
-| Epic | Focus |
+| Epic | Status |
 | --- | --- |
-| 1 | **PostgreSQL + Alembic**, **RabbitMQ LLM queue** [partial], **Redis rate limit + snapshot cache** [shipped] |
-| 2 | `ThreadManager` (context drift), entity resolution for assignees/tasks |
-| 3 | Semantic policy engine, unified AI audit trail |
-| 4 | `tests/evals` golden set, tool/parameter accuracy benchmarks in CI |
+| 1 | PostgreSQL + Alembic, RabbitMQ LLM queue, Redis rate limits + snapshot cache |
+| 2 | `ThreadManager`, entity resolution, Slack thread follow-ups |
+| 3 | Semantic policy engine, unified audit dashboard |
+| 4 | Golden eval suite (`tests/evals`), accuracy thresholds enforced in **CI** |
 
-**Done:** pytest integration tests (`python -m pytest`).
+**CI:** GitHub Actions runs `python -m pytest` (SQLite + mocked planner evals) and an optional Postgres smoke test via `POSTGRES_TEST_URL`. Live OpenAI evals stay opt-in (`EVAL_LIVE=1`, excluded by default in `pytest.ini`).
 
 ---
 

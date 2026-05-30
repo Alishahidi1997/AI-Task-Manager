@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: smarttask
+          POSTGRES_PASSWORD: smarttask
+          POSTGRES_DB: smarttask
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U smarttask -d smarttask"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Pytest (SQLite + mocked planner evals)
+        env:
+          DISABLE_SCHEDULER: "1"
+          JWT_SECRET_KEY: ci-jwt-secret
+        run: python -m pytest -q --tb=short
+
+      - name: PostgreSQL + Alembic smoke test
+        env:
+          DISABLE_SCHEDULER: "1"
+          JWT_SECRET_KEY: ci-jwt-secret
+          POSTGRES_TEST_URL: postgresql+psycopg://smarttask:smarttask@localhost:5432/smarttask
+        run: python -m pytest tests/test_postgres.py -q --tb=short

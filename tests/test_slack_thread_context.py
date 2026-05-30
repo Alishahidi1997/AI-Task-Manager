@@ -19,7 +19,7 @@ def test_slack_followup_uses_thread_without_second_llm(mock_plan, client, monkey
 
     due = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
     mock_plan.return_value = {
-        "tool": "create_task",
+        "tool_name": "create_task",
         "arguments": {
             "title": "Slack thread task",
             "assignee": "idempotency@example.com",
@@ -70,7 +70,7 @@ def test_slack_followup_uses_thread_without_second_llm(mock_plan, client, monkey
 def test_try_resolve_slack_followup_returns_slack_shape():
     raw = try_resolve_slack_followup("mark that done", 42)
     assert raw is not None
-    assert raw["tool"] == "update_task"
+    assert raw["tool_name"] == "update_task"
     assert raw["arguments"]["task_id"] == 42
 
 

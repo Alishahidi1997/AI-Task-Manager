@@ -66,7 +66,7 @@ def test_slack_duplicate_delivery_skips_second_execution(mock_plan, client, monk
 
     due = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
     mock_plan.return_value = {
-        "tool": "create_task",
+        "tool_name": "create_task",
         "arguments": {
             "title": "Idempotent task",
             "assignee": "idempotency@example.com",
