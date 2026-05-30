@@ -13,7 +13,7 @@ from app.services.entity_resolution import try_resolve_followup
 from app.services.rbac import allowed_tools_for_role
 from app.services.task_workflow import assert_status_transition
 from app.services.thread_manager import ThreadManager, api_thread_key
-from app.validation.json_validator import validate_chat_planner_output
+from app.validation.json_validator import PlannerOutput, validate_chat_planner_output
 from app.validation.policy_engine import enforce_policies
 
 VALID_STATUS = {"todo", "in_progress", "done"}
@@ -41,14 +41,6 @@ class UpdateTaskArgs(BaseModel):
 
 class DeleteTaskArgs(BaseModel):
     task_id: int
-
-
-class PlannerOutput(BaseModel):
-    tool_name: str
-    arguments: dict
-    confidence: float = Field(ge=0.0, le=1.0)
-    missing_required: list[str] = Field(default_factory=list)
-    clarification_question: str | None = None
 
 
 def _tool_registry() -> dict:

@@ -22,7 +22,7 @@ def build_planner_system_prompt(
         f"allowed_tools={json.dumps(tools, ensure_ascii=True)}\n"
         "Output format:\n"
         "{\n"
-        '  "tool": "tool_name",\n'
+        '  "tool_name": "create_task",\n'
         '  "arguments": { ... },\n'
         '  "confidence": 0.0,\n'
         '  "missing_required": [],\n'

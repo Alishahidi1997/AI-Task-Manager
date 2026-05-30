@@ -84,7 +84,7 @@ def keyword_planner(case: GoldenCase) -> dict:
             "clarification_question": None,
         }
     return {
-        "tool": tool,
+        "tool_name": tool,
         "arguments": args,
         "confidence": confidence,
         "missing_required": missing,

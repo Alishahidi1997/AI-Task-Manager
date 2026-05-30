@@ -276,7 +276,7 @@ async def _orchestrate_slack_message_after_user_map(
                 allowed_tools=allowed,
             )
             merged_args = apply_task_id_from_title(
-                db, user.id, validated_plan.tool, validated_plan.arguments, text
+                db, user.id, validated_plan.tool_name, validated_plan.arguments, text
             )
             if merged_args != validated_plan.arguments:
                 validated_plan = validated_plan.model_copy(update={"arguments": merged_args})
@@ -296,7 +296,7 @@ async def _orchestrate_slack_message_after_user_map(
                 claim_row,
                 request_text=text,
                 user=user,
-                tool_name=validated_plan.tool,
+                tool_name=validated_plan.tool_name,
                 arguments=validated_plan.arguments,
                 validation_result="clarification",
                 execution_result="clarification_required",
@@ -330,7 +330,7 @@ async def _orchestrate_slack_message_after_user_map(
         with recorder.span("policy"):
             enforce_policies(
                 identity_context,
-                validated_plan.tool,
+                validated_plan.tool_name,
                 validated_plan.arguments,
                 db=db,
             )
@@ -430,7 +430,7 @@ async def _orchestrate_slack_message_after_user_map(
     try:
         with recorder.span("execution"):
             exec_result = execute_slack_tool(
-                tool=validated_plan.tool,
+                tool=validated_plan.tool_name,
                 arguments=validated_plan.arguments,
                 user=user,
                 db=db,
@@ -448,7 +448,7 @@ async def _orchestrate_slack_message_after_user_map(
             claim_row,
             request_text=text,
             user=user,
-            tool_name=validated_plan.tool,
+            tool_name=validated_plan.tool_name,
             arguments=validated_plan.arguments,
             validation_result="passed",
             execution_result="denied",
@@ -491,7 +491,7 @@ async def _orchestrate_slack_message_after_user_map(
             claim_row,
             request_text=text,
             user=user,
-            tool_name=validated_plan.tool,
+            tool_name=validated_plan.tool_name,
             arguments=validated_plan.arguments,
             validation_result="passed",
             execution_result="failed",
@@ -529,11 +529,11 @@ async def _orchestrate_slack_message_after_user_map(
     thread_mgr.add_turn(
         thread_row,
         "assistant",
-        f"executed {validated_plan.tool} task_id={exec_result.get('task_id')}",
+        f"executed {validated_plan.tool_name} task_id={exec_result.get('task_id')}",
         task_id=exec_result.get("task_id"),
     )
 
-    tool = validated_plan.tool
+    tool = validated_plan.tool_name
     tid = exec_result.get("task_id")
     st = exec_result.get("status")
     success_bits = [f"Done — executed `{tool}`."]
@@ -552,7 +552,7 @@ async def _orchestrate_slack_message_after_user_map(
         claim_row,
         request_text=text,
         user=user,
-        tool_name=validated_plan.tool,
+        tool_name=validated_plan.tool_name,
         arguments=validated_plan.arguments,
         validation_result="passed",
         execution_result="executed",

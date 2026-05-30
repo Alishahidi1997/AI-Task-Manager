@@ -7,6 +7,7 @@ from app.llm.openai_client import plan_tool_call
 from app.llm.openai_transport import post_chat_completion_sync
 from app.orchestration.prompt_builder import build_planner_system_prompt
 from app.orchestration.tool_registry import filter_tools, tool_schema_map
+from app.validation.json_validator import normalize_planner_raw
 from app.services.chat_orchestrator import _chat_planner_openai_payload, _chat_tool_registry_for_user
 from app.services.rbac import allowed_tools_for_role
 
@@ -51,7 +52,7 @@ def live_planner(case: GoldenCase) -> dict:
         "tenant": "eval-tenant",
     }
     prompt = build_planner_system_prompt(identity, tools)
-    raw = plan_tool_call(prompt, case.input)
-    if raw.get("tool") not in schemas:
+    raw = normalize_planner_raw(plan_tool_call(prompt, case.input))
+    if raw.get("tool_name") not in schemas:
         return raw
     return raw

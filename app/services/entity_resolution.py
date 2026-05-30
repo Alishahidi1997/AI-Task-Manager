@@ -34,7 +34,7 @@ def try_resolve_followup(message: str, last_task_id: int | None):
     Deterministic follow-up when the user refers to the thread's last task.
     Returns a PlannerOutput ready for validation/execution, or None to use the LLM.
     """
-    from app.services.chat_orchestrator import PlannerOutput
+    from app.validation.json_validator import PlannerOutput
 
     if last_task_id is None or not message_references_session_task(message):
         return None
@@ -74,28 +74,22 @@ def try_resolve_followup(message: str, last_task_id: int | None):
 
 
 def try_resolve_slack_followup(message: str, last_task_id: int | None) -> dict | None:
-    """Slack planner JSON (tool + arguments) for deterministic thread follow-ups."""
+    """Planner JSON for Slack deterministic thread follow-ups (canonical ``tool_name``)."""
     chat_plan = try_resolve_followup(message, last_task_id)
     if chat_plan is None:
         return None
-    return {
-        "tool": chat_plan.tool_name,
-        "arguments": chat_plan.arguments,
-        "confidence": chat_plan.confidence,
-        "missing_required": chat_plan.missing_required,
-        "clarification_question": chat_plan.clarification_question,
-    }
+    return chat_plan.model_dump()
 
 
 def apply_task_id_from_title(
     db,
     user_id: int,
-    tool: str,
+    tool_name: str,
     arguments: dict,
     message: str,
 ) -> dict:
     """Fill task_id on update/delete when the user names a task title in the message."""
-    if tool not in {"update_task", "delete_task", "assign_task"}:
+    if tool_name not in {"update_task", "delete_task", "assign_task"}:
         return arguments
     if arguments.get("task_id") is not None:
         return arguments
