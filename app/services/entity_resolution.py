@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 _FOLLOWUP_PHRASES = (
     "that task",
     "that one",
@@ -124,3 +126,99 @@ def resolve_task_id_from_title(db, user_id: int, title_fragment: str) -> int | N
         .first()
     )
     return row.id if row else None
+
+
+def _looks_like_email(value: str) -> bool:
+    return "@" in value.strip()
+
+
+def _email_local(email: str) -> str:
+    return email.split("@", 1)[0].lower()
+
+
+def extract_assignee_from_message(message: str) -> str | None:
+    """Pull assignee hint from natural language when the planner omitted it."""
+    patterns = (
+        r"\bassign(?:ed)?\s+to\s+([^\n,.;]+)",
+        r"\bassignee\s+([^\n,.;]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, message, flags=re.IGNORECASE)
+        if match:
+            hint = match.group(1).strip().strip('"').strip("'")
+            if hint:
+                return hint
+    return None
+
+
+def find_assignee_candidates(db, tenant_id: str, hint: str):
+    """Match assignee hints against tenant users by email local-part or slack id."""
+    from app.models import User
+
+    needle = hint.strip().lower()
+    if not needle:
+        return []
+
+    rows = db.query(User).filter(User.tenant_id == tenant_id).all()
+    if _looks_like_email(needle):
+        return [user for user in rows if user.email.lower() == needle]
+
+    exact: list = []
+    prefix: list = []
+    for user in rows:
+        if user.slack_user_id and user.slack_user_id.lower() == needle:
+            exact.append(user)
+            continue
+        local = _email_local(user.email)
+        if local == needle:
+            exact.append(user)
+        elif local.startswith(needle):
+            prefix.append(user)
+
+    if exact:
+        return list({user.id: user for user in exact}.values())
+    return list({user.id: user for user in prefix}.values())
+
+
+def apply_assignee_resolution(
+    db,
+    tenant_id: str,
+    arguments: dict,
+    message: str,
+) -> tuple[dict, str | None]:
+    """
+    Resolve assignee name fragments to tenant user emails before policy/execute.
+    Returns updated arguments and an optional clarification question when ambiguous.
+    """
+    merged = dict(arguments)
+    hint = merged.get("assignee")
+    if not hint:
+        hint = extract_assignee_from_message(message)
+        if hint:
+            merged["assignee"] = hint
+
+    assignee = merged.get("assignee")
+    if not assignee:
+        return merged, None
+
+    assignee_str = str(assignee).strip()
+    if _looks_like_email(assignee_str):
+        from app.models import User
+
+        row = (
+            db.query(User)
+            .filter(User.tenant_id == tenant_id, User.email.ilike(assignee_str))
+            .first()
+        )
+        if row is not None:
+            merged["assignee"] = row.email
+        return merged, None
+
+    candidates = find_assignee_candidates(db, tenant_id, assignee_str)
+    if len(candidates) == 1:
+        merged["assignee"] = candidates[0].email
+        return merged, None
+    if len(candidates) > 1:
+        options = ", ".join(sorted(user.email for user in candidates))
+        return merged, f"Which assignee did you mean? Options: {options}"
+    return merged, f"I couldn't find a user matching '{assignee_str}' in your workspace."

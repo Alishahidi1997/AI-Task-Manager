@@ -12,7 +12,11 @@ from app.deps import get_http_client, get_redis
 from app.llm.openai_client import plan_tool_call_async
 from app.models import AuditLog, SlackOrchestrationTrace, User
 from app.orchestration.prompt_builder import build_planner_system_prompt
-from app.services.entity_resolution import apply_task_id_from_title, try_resolve_slack_followup
+from app.services.entity_resolution import (
+    apply_assignee_resolution,
+    apply_task_id_from_title,
+    try_resolve_slack_followup,
+)
 from app.services.thread_manager import ThreadManager, slack_thread_key
 from app.orchestration.tool_registry import filter_tools, tool_schema_map
 from app.services.rbac import allowed_tools_for_role
@@ -279,6 +283,20 @@ async def _orchestrate_slack_message_after_user_map(
                 db, user.id, validated_plan.tool_name, validated_plan.arguments, text
             )
             if merged_args != validated_plan.arguments:
+                validated_plan = validated_plan.model_copy(update={"arguments": merged_args})
+            merged_args, assignee_clarify = apply_assignee_resolution(
+                db, tenant_id, validated_plan.arguments, text
+            )
+            if assignee_clarify:
+                validated_plan = validated_plan.model_copy(update={"arguments": merged_args})
+                validated_plan = validated_plan.model_copy(
+                    update={
+                        "missing_required": ["assignee"],
+                        "clarification_question": assignee_clarify,
+                        "confidence": min(validated_plan.confidence, 0.3),
+                    }
+                )
+            elif merged_args != validated_plan.arguments:
                 validated_plan = validated_plan.model_copy(update={"arguments": merged_args})
         if validated_plan.missing_required or validated_plan.confidence < 0.35:
             clarify_q = validated_plan.clarification_question or (

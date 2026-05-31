@@ -121,7 +121,7 @@ All **Epics 1–4** and stretch ops are implemented. Details and acceptance crit
 | Epic | Status |
 | --- | --- |
 | 1 | PostgreSQL + Alembic, RabbitMQ LLM queue, Redis rate limits + snapshot cache |
-| 2 | `ThreadManager`, entity resolution, Slack thread follow-ups |
+| 2 | `ThreadManager`, entity resolution (task follow-ups, assignee name lookup), Slack thread follow-ups |
 | 3 | Semantic policy engine, unified audit dashboard |
 | 4 | Golden eval suite (`tests/evals`), accuracy thresholds enforced in **CI** |
 

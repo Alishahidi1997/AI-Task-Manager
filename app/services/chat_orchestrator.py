@@ -9,7 +9,7 @@ from app.llm.openai_client import stream_chat_completion_text
 from app.llm.openai_transport import post_chat_completion_async
 from app.models import Task
 from app.services.category_guess import guess_category
-from app.services.entity_resolution import try_resolve_followup
+from app.services.entity_resolution import apply_assignee_resolution, try_resolve_followup
 from app.services.rbac import allowed_tools_for_role
 from app.services.task_workflow import assert_status_transition
 from app.services.thread_manager import ThreadManager, api_thread_key
@@ -171,6 +171,7 @@ def _complete_after_plan(
     db,
     *,
     allow_compact_done_transition: bool = False,
+    message: str = "",
 ):
     if planner_output.missing_required:
         return {
@@ -190,6 +191,24 @@ def _complete_after_plan(
             "identity": identity_ctx,
             "raw_planner_output": raw_output,
         }
+
+    tenant = identity_ctx.get("tenant")
+    if db is not None and tenant:
+        merged_args, assignee_clarify = apply_assignee_resolution(
+            db, tenant, planner_output.arguments, message
+        )
+        if assignee_clarify:
+            return {
+                "status": "clarification_required",
+                "question": assignee_clarify,
+                "planner_output": planner_output.model_dump(),
+                "identity": identity_ctx,
+                "raw_planner_output": raw_output,
+            }
+        if merged_args != planner_output.arguments:
+            planner_output = planner_output.model_copy(update={"arguments": merged_args})
+            raw_output = planner_output.model_dump()
+
     try:
         validated_args = _validate_tool_output(planner_output)
     except (ValidationError, ValueError) as exc:
@@ -308,6 +327,7 @@ async def orchestrate_chat(
             current_user,
             db,
             allow_compact_done_transition=True,
+            message=message,
         )
     else:
         planner_output, raw_output = await _llm_plan_async(
@@ -319,7 +339,9 @@ async def orchestrate_chat(
             conversation_id,
             thread_context,
         )
-        result = _complete_after_plan(planner_output, raw_output, identity_ctx, current_user, db)
+        result = _complete_after_plan(
+            planner_output, raw_output, identity_ctx, current_user, db, message=message
+        )
 
     if thread_mgr and thread_row is not None:
         thread_mgr.record_execution_result(thread_row, result)
@@ -348,6 +370,7 @@ def orchestrate_clarify(
 
     arguments = dict(planner_data.get("arguments") or {})
     missing = list(planner_data.get("missing_required") or [])
+    identity_ctx = _build_identity_context(current_user)
     if missing:
         field = missing.pop(0)
         value = answer.strip()
@@ -359,6 +382,13 @@ def orchestrate_clarify(
                 raise ValueError(f"invalid due_date: {value}") from exc
         else:
             arguments[field] = value
+        if field == "assignee":
+            merged, clarify = apply_assignee_resolution(
+                db, identity_ctx.get("tenant") or f"user-{current_user.id}", arguments, answer
+            )
+            if clarify:
+                raise ValueError(clarify)
+            arguments = merged
 
     planner_output = PlannerOutput(
         tool_name=tool_name,
@@ -367,7 +397,6 @@ def orchestrate_clarify(
         missing_required=missing,
         clarification_question=None,
     )
-    identity_ctx = _build_identity_context(current_user)
     raw_output = planner_output.model_dump()
     result = _complete_after_plan(planner_output, raw_output, identity_ctx, current_user, db)
     thread_mgr.add_turn(thread_row, "user", f"[clarify] {answer}")
