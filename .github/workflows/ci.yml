@@ -25,6 +25,16 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      rabbitmq:
+        image: rabbitmq:3.13-alpine
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -49,3 +59,10 @@ jobs:
           JWT_SECRET_KEY: ci-jwt-secret
           POSTGRES_TEST_URL: postgresql+psycopg://smarttask:smarttask@localhost:5432/smarttask
         run: python -m pytest tests/test_postgres.py -q --tb=short
+
+      - name: RabbitMQ orchestration queue smoke test
+        env:
+          DISABLE_SCHEDULER: "1"
+          JWT_SECRET_KEY: ci-jwt-secret
+          RABBITMQ_URL: amqp://guest:guest@localhost:5672/
+        run: python -m pytest tests/test_rabbitmq_integration.py -q --tb=short

@@ -16,7 +16,7 @@ The LLM acts only as a planner. It suggests structured tool calls, while the bac
 - Full audit logging of all AI-driven actions
 - Hybrid architecture combining REST API, AI orchestration, and Slack integration
 - Insights engine for productivity, priorities, and anomalies
-- Async-ready design prepared for queues and worker-based scaling
+- RabbitMQ-backed LLM orchestration workers (`/chat`, Slack, `/ai/*`, daily summaries)
 
 ---
 
@@ -39,9 +39,9 @@ The model suggests, the system decides.
 - Backend: FastAPI (Python)
 - Frontend: React (optional UI)
 - Authentication: JWT
-- Database: SQLite (extendable to PostgreSQL)
+- Database: SQLite (local) or PostgreSQL + Alembic (production-shaped)
 - AI: OpenAI tool calling (optional via API key)
-- Async: Background tasks (queue-ready design)
+- Async: RabbitMQ workers for LLM orchestration and batch jobs
 - Integrations: Slack Events API
 
 ---
@@ -125,7 +125,7 @@ All **Epics 1–4** and stretch ops are implemented. Details and acceptance crit
 | 3 | Semantic policy engine, unified audit dashboard |
 | 4 | Golden eval suite (`tests/evals`), accuracy thresholds enforced in **CI** |
 
-**CI:** GitHub Actions runs `python -m pytest` (SQLite + mocked planner evals) and an optional Postgres smoke test via `POSTGRES_TEST_URL`. Live OpenAI evals stay opt-in (`EVAL_LIVE=1`, excluded by default in `pytest.ini`).
+**CI:** GitHub Actions runs `python -m pytest` (SQLite + mocked planner evals), Postgres smoke test, and RabbitMQ queue delivery test (`RABBITMQ_URL`). Live OpenAI evals stay opt-in (`EVAL_LIVE=1`, excluded by default in `pytest.ini`).
 
 ---
 
