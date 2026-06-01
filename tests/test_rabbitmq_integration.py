@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from unittest.mock import patch
 
 import pika
@@ -21,6 +22,17 @@ pytestmark = pytest.mark.skipif(
     not os.getenv("RABBITMQ_URL", "").strip(),
     reason="set RABBITMQ_URL to run RabbitMQ integration tests",
 )
+
+
+def _blocking_connection(url: str, *, attempts: int = 12, delay_sec: float = 1.0) -> pika.BlockingConnection:
+    last_error: Exception | None = None
+    for _ in range(attempts):
+        try:
+            return pika.BlockingConnection(pika.URLParameters(url))
+        except Exception as exc:  # noqa: BLE001 — broker may be starting
+            last_error = exc
+            time.sleep(delay_sec)
+    raise RuntimeError(f"could not connect to RabbitMQ at {url}") from last_error
 
 
 def test_broker_delivers_chat_job_to_worker_handler(monkeypatch):
@@ -50,8 +62,7 @@ def test_broker_delivers_chat_job_to_worker_handler(monkeypatch):
     finally:
         db.close()
 
-    params = pika.URLParameters(rabbitmq_url())
-    connection = pika.BlockingConnection(params)
+    connection = _blocking_connection(rabbitmq_url())
     try:
         channel = connection.channel()
         _ensure_topology(channel)

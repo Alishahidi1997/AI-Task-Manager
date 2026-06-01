@@ -27,6 +27,10 @@ jobs:
 
       rabbitmq:
         image: rabbitmq:3.13-alpine
+        env:
+          # guest is loopback-only in RabbitMQ 3.x; CI connects via mapped port from the runner.
+          RABBITMQ_DEFAULT_USER: smarttask
+          RABBITMQ_DEFAULT_PASS: smarttask
         ports:
           - 5672:5672
         options: >-
@@ -64,5 +68,5 @@ jobs:
         env:
           DISABLE_SCHEDULER: "1"
           JWT_SECRET_KEY: ci-jwt-secret
-          RABBITMQ_URL: amqp://guest:guest@localhost:5672/
+          RABBITMQ_URL: amqp://smarttask:smarttask@localhost:5672/
         run: python -m pytest tests/test_rabbitmq_integration.py -q --tb=short
