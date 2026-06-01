@@ -129,6 +129,24 @@ All **Epics 1–4** and stretch ops are implemented. Details and acceptance crit
 
 ---
 
+## Phase 3 (backlog — not implemented)
+
+Phase 2 is complete. The items below were identified as gaps or polish; **none are done yet** (some have partial behavior noted).
+
+| # | Item | Implemented? | Current state |
+| --- | --- | --- | --- |
+| 3.1 | **Design doc sync** | No | `project.md` intro still lists Postgres/RabbitMQ/evals/Prometheus as “deferred”; Phase 2 sections are shipped. Sync intro + “last aligned” footer. |
+| 3.2 | **Live OpenAI evals in CI** | No (by design) | PR CI uses mocked keyword planner (`tests/test_planner_evals.py`). Live suite needs `EVAL_LIVE=1` + `OPENAI_API_KEY`; optional separate workflow (e.g. nightly, non-blocking). |
+| 3.3 | **React chat + queued jobs** | No | `frontend/src/api.ts` polls `GET /jobs/{id}` on **202** for `/ai/*` only. No `/chat` or `/chat/stream` UI; no conversation thread UX. |
+| 3.4 | **Redis in CI** | No | Rate limits + insights snapshot cache work when `REDIS_URL` is set locally; GitHub Actions has no Redis service or integration test. |
+| 3.5 | **`assignee` on `Task` model** | Partial | Assignee resolved for policy; Slack/chat store assignee in `description` text (`Assignee: …`), not a dedicated column. |
+| 3.6 | **`assign_task` on `/chat`** | No | Slack + RBAC support `assign_task`; `CHAT_TOOL_NAMES` is only `create_task`, `update_task`, `delete_task`. |
+| 3.7 | **Production hardening** | No | No job-completion webhooks; Slack limits are per-user not per-workspace; idempotency reclaim is single-node oriented; assignee resolution uses email local-part, not a display-name directory. |
+
+**Suggested order:** 3.1 (docs) → 3.4 + 3.2 (CI) → 3.3 (frontend) → 3.5–3.6 (data model + planner parity) → 3.7 (as needed for deploy story).
+
+---
+
 ## Setup
 
 ```bash
