@@ -68,5 +68,6 @@ jobs:
         env:
           DISABLE_SCHEDULER: "1"
           JWT_SECRET_KEY: ci-jwt-secret
+          RUN_RABBITMQ_INTEGRATION: "1"
           RABBITMQ_URL: amqp://smarttask:smarttask@localhost:5672/
         run: python -m pytest tests/test_rabbitmq_integration.py -q --tb=short

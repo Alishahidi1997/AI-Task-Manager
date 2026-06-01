@@ -18,9 +18,16 @@ from app.queue.publisher import _ensure_topology, publish_llm_job
 from app.services.llm_jobs import build_queue_message, create_llm_job
 from app.worker.handlers import process_llm_job_message
 
+def _rabbitmq_integration_enabled() -> bool:
+    """Only run when CI (or dev) explicitly opts in — avoids local .env RABBITMQ_URL without a broker."""
+    return bool(os.getenv("RABBITMQ_URL", "").strip()) and os.getenv(
+        "RUN_RABBITMQ_INTEGRATION", ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
+
 pytestmark = pytest.mark.skipif(
-    not os.getenv("RABBITMQ_URL", "").strip(),
-    reason="set RABBITMQ_URL to run RabbitMQ integration tests",
+    not _rabbitmq_integration_enabled(),
+    reason="set RUN_RABBITMQ_INTEGRATION=1 and RABBITMQ_URL to run broker integration tests",
 )
 
 
@@ -37,7 +44,8 @@ def _blocking_connection(url: str, *, attempts: int = 12, delay_sec: float = 1.0
 
 def test_broker_delivers_chat_job_to_worker_handler(monkeypatch):
     """Publish to llm.orchestration.high and process one message end-to-end."""
-    broker_url = os.environ["RABBITMQ_URL"].strip()
+    broker_url = os.getenv("RABBITMQ_URL", "").strip()
+    assert broker_url, "RABBITMQ_URL must be set for this integration test"
     monkeypatch.setenv("RABBITMQ_URL", broker_url)
 
     db = SessionLocal()

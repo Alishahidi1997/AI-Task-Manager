@@ -130,6 +130,7 @@ def test_slack_queue_skips_enqueue_on_duplicate(mock_publish, client, monkeypatc
     """Queued path must not publish a second job when event_id was already executed."""
     monkeypatch.setenv("SLACK_EVENTS_ASYNC", "true")
     monkeypatch.setenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
+    monkeypatch.setenv("LLM_QUEUE_ENABLED", "true")
     _seed_slack_user(client)
 
     db = SessionLocal()

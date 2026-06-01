@@ -16,8 +16,10 @@ def test_environment(tmp_path_factory) -> Generator[None, None, None]:
     os.environ["DISABLE_SCHEDULER"] = "1"
     os.environ["JWT_SECRET_KEY"] = "pytest-jwt-secret"
     os.environ["SLACK_SKIP_SIGNATURE_VERIFY"] = "true"
+    # Keep API tests on sync /chat unless a test opts in; do not strip RABBITMQ_URL
+    # (CI sets it for test_rabbitmq_integration.py — popping caused KeyError in that job).
+    os.environ["LLM_QUEUE_ENABLED"] = "false"
     os.environ.pop("OPENAI_API_KEY", None)
-    os.environ.pop("RABBITMQ_URL", None)
     os.environ.pop("REDIS_URL", None)
     yield
 
