@@ -20,7 +20,7 @@ def test_environment(tmp_path_factory) -> Generator[None, None, None]:
     # (CI sets it for test_rabbitmq_integration.py — popping caused KeyError in that job).
     os.environ["LLM_QUEUE_ENABLED"] = "false"
     os.environ.pop("OPENAI_API_KEY", None)
-    os.environ.pop("REDIS_URL", None)
+    # Keep REDIS_URL for CI integration job (test_redis_integration.py).
     yield
 
 

@@ -125,7 +125,21 @@ All **Epics 1–4** and stretch ops are implemented. Details and acceptance crit
 | 3 | Semantic policy engine, unified audit dashboard |
 | 4 | Golden eval suite (`tests/evals`), accuracy thresholds enforced in **CI** |
 
-**CI:** GitHub Actions runs `python -m pytest` (SQLite + mocked planner evals), Postgres smoke test, and RabbitMQ queue delivery test (`RABBITMQ_URL`). Live OpenAI evals stay opt-in (`EVAL_LIVE=1`, excluded by default in `pytest.ini`).
+**CI:** GitHub Actions runs `python -m pytest` (SQLite + mocked planner evals), Postgres smoke test, RabbitMQ queue delivery test, and Redis rate-limit/cache smoke test. Live OpenAI evals stay opt-in (`EVAL_LIVE=1`, excluded by default in `pytest.ini`).
+
+---
+
+## Phase 3 (backlog)
+
+| ID | Item | Status |
+| --- | --- | --- |
+| 3.1 | Sync design docs with shipped Phase 2 | Planned |
+| 3.2 | Optional live OpenAI eval workflow in CI | Planned |
+| 3.3 | React `/chat` + queued job/stream UX | Planned |
+| 3.4 | Redis in CI (rate limits + snapshot cache) | **Done** |
+| 3.5 | `Task.assignee` column | Planned |
+| 3.6 | `assign_task` on `/chat` | Planned |
+| 3.7 | Production hardening (webhooks, workspace limits, etc.) | Planned |
 
 ---
 
@@ -185,6 +199,8 @@ uvicorn app.main:app --reload
 ```
 
 Tune via `.env.example`: `RATE_LIMIT_CHAT_PER_MINUTE`, `RATE_LIMIT_SLACK_PER_MINUTE`, `INSIGHTS_SNAPSHOT_CACHE_SECONDS`. Set `RATE_LIMIT_ENABLED=false` to keep Redis for stats/cache only.
+
+CI: `RUN_REDIS_INTEGRATION=1 REDIS_URL=redis://localhost:6379/0 python -m pytest tests/test_redis_integration.py`
 
 ### Tests
 
