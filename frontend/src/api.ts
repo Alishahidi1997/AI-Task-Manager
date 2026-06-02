@@ -549,6 +549,69 @@ export async function getAnalyticsPlayback(params: {
   return request<PlaybackResponse>(`/analytics/playback?${query.toString()}`);
 }
 
+export type ChatOrchestrationResult = {
+  status: string;
+  audit_id?: number;
+  question?: string;
+  reason?: string;
+  planner_output?: {
+    tool_name?: string;
+    arguments?: Record<string, unknown>;
+  };
+  result?: {
+    tool_name?: string;
+    task_id?: number;
+    status?: string;
+  };
+};
+
+function chatConversationStorageKey(): string {
+  return "smart_tracker_chat_conversation_id";
+}
+
+export function getOrCreateChatConversationId(): string {
+  const key = chatConversationStorageKey();
+  let id = sessionStorage.getItem(key);
+  if (!id) {
+    id = `web-${crypto.randomUUID()}`;
+    sessionStorage.setItem(key, id);
+  }
+  return id;
+}
+
+export function resetChatConversationId(): string {
+  const id = `web-${crypto.randomUUID()}`;
+  sessionStorage.setItem(chatConversationStorageKey(), id);
+  return id;
+}
+
+/** Natural-language orchestration (`POST /chat`). Polls `GET /jobs/{id}` automatically on 202. */
+export async function sendChatMessage(
+  message: string,
+  conversationId: string,
+): Promise<ChatOrchestrationResult> {
+  return request<ChatOrchestrationResult>("/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message,
+      source: "web",
+      conversation_id: conversationId,
+    }),
+  });
+}
+
+export async function sendChatClarify(
+  conversationId: string,
+  answer: string,
+): Promise<ChatOrchestrationResult> {
+  return request<ChatOrchestrationResult>("/clarify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ conversation_id: conversationId, answer }),
+  });
+}
+
 export async function parseTaskText(text: string): Promise<ParsedTaskResponse> {
   const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   return request<ParsedTaskResponse>("/ai/parse-task", {

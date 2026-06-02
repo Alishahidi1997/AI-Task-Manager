@@ -133,9 +133,9 @@ All **Epics 1–4** and stretch ops are implemented. Details and acceptance crit
 
 | ID | Item | Status |
 | --- | --- | --- |
-| 3.1 | Sync design docs with shipped Phase 2 | Planned |
+| 3.1 | Sync design docs with shipped Phase 2 | Partial (see `project.md`; intro updated) |
 | 3.2 | Optional live OpenAI eval workflow in CI | Planned |
-| 3.3 | React `/chat` + queued job/stream UX | Planned |
+| 3.3 | React `/chat` + queued job/stream UX | **Done** (chat panel; 202 auto-poll via `api.ts`) |
 | 3.4 | Redis in CI (rate limits + snapshot cache) | **Done** |
 | 3.5 | `Task.assignee` column | Planned |
 | 3.6 | `assign_task` on `/chat` | Planned |

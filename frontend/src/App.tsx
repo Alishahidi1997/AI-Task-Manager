@@ -32,6 +32,7 @@ import {
   updateTaskStatus,
 } from "./api";
 import { AuthPanel } from "./components/AuthPanel";
+import { ChatPanel } from "./components/ChatPanel";
 import { TaskComposerPanel } from "./components/TaskComposerPanel";
 import { TaskListPanel } from "./components/TaskListPanel";
 import type {
@@ -884,6 +885,8 @@ function App() {
             onDescriptionChange={setDescription}
             onDueDateChange={setDueDate}
           />
+
+          <ChatPanel onTasksChanged={() => void loadTasks()} />
 
           <section className="panel">
             <h2>AI Command Console</h2>
