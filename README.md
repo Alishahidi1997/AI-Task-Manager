@@ -125,7 +125,7 @@ All **Epics 1–4** and stretch ops are implemented. Details and acceptance crit
 | 3 | Semantic policy engine, unified audit dashboard |
 | 4 | Golden eval suite (`tests/evals`), accuracy thresholds enforced in **CI** |
 
-**CI:** GitHub Actions runs `python -m pytest` (SQLite + mocked planner evals), Postgres smoke test, RabbitMQ queue delivery test, and Redis rate-limit/cache smoke test. Live OpenAI evals stay opt-in (`EVAL_LIVE=1`, excluded by default in `pytest.ini`).
+**CI:** GitHub Actions runs `python -m pytest` (SQLite + mocked planner evals), Postgres smoke test, RabbitMQ queue delivery test, and Redis rate-limit/cache smoke test. Live OpenAI evals are opt-in: excluded from `ci.yml` via `pytest.ini` (`-m "not live_openai"`); run manually with the **Live planner eval** workflow (`workflow_dispatch`, secret `OPENAI_API_KEY`) or locally with `EVAL_LIVE=1`.
 
 ---
 
@@ -134,7 +134,7 @@ All **Epics 1–4** and stretch ops are implemented. Details and acceptance crit
 | ID | Item | Status |
 | --- | --- | --- |
 | 3.1 | Sync design docs with shipped Phase 2 | Partial (see `project.md`; intro updated) |
-| 3.2 | Optional live OpenAI eval workflow in CI | Planned |
+| 3.2 | Optional live OpenAI eval workflow in CI | **Done** (`.github/workflows/eval-live.yml`, manual dispatch) |
 | 3.3 | React `/chat` + queued job/stream UX | **Done** (chat panel; 202 auto-poll via `api.ts`) |
 | 3.4 | Redis in CI (rate limits + snapshot cache) | **Done** |
 | 3.5 | `Task.assignee` column | Planned |
