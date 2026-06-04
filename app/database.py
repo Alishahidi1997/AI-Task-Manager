@@ -85,6 +85,8 @@ def migrate_sqlite(bind: Engine) -> None:
         if "user_id" not in col_names:
             conn.execute(text("ALTER TABLE tasks ADD COLUMN user_id INTEGER"))
             conn.execute(text("UPDATE tasks SET user_id = 1 WHERE user_id IS NULL"))
+        if "assignee" not in col_names:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN assignee VARCHAR(255)"))
 
         conn.execute(
             text(

@@ -20,6 +20,7 @@ class Task(Base):
     due_date = Column(DateTime(timezone=True), nullable=True)
     category = Column(String(64), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
+    assignee = Column(String(255), nullable=True, index=True)
     user_id = Column(Integer, nullable=False, default=1)
 
 
