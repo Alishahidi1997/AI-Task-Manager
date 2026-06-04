@@ -41,6 +41,7 @@ def create_task(
         due_date=payload.due_date,
         category=cat,
         completed_at=done_at,
+        assignee=payload.assignee,
         user_id=current_user.id,
     )
     db.add(task)

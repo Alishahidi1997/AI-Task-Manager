@@ -18,6 +18,7 @@ class TaskCreate(BaseModel):
     status: Status = "todo"
     due_date: datetime | None = None
     category: Category | None = None
+    assignee: str | None = Field(default=None, max_length=255)
 
 
 class TaskUpdate(BaseModel):
@@ -28,6 +29,7 @@ class TaskUpdate(BaseModel):
     status: Status | None = None
     due_date: datetime | None = None
     category: Category | None = None
+    assignee: str | None = Field(default=None, max_length=255)
 
 
 class TaskOut(BaseModel):
@@ -41,3 +43,4 @@ class TaskOut(BaseModel):
     due_date: datetime | None
     category: str | None
     completed_at: datetime | None
+    assignee: str | None = None
