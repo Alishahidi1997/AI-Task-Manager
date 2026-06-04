@@ -255,6 +255,7 @@ def _execute(tool_name: str, args, current_user, db, *, allow_compact_done_trans
             due_date=args.due_date,
             status="todo",
             category=category,
+            assignee=args.assignee,
             user_id=current_user.id,
         )
         db.add(task)
@@ -272,6 +273,8 @@ def _execute(tool_name: str, args, current_user, db, *, allow_compact_done_trans
             task.description = args.description
         if args.due_date is not None:
             task.due_date = args.due_date
+        if args.assignee is not None:
+            task.assignee = args.assignee
         if args.status is not None:
             target = args.status
             if allow_compact_done_transition and target == "done" and task.status == "todo":

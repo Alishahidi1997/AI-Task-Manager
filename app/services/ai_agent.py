@@ -162,6 +162,8 @@ def run_agent_command(query: str, current_user, db, timezone_name: str | None = 
             description = args.get("description")
             if description is not None:
                 description = str(description)[:8000]
+            assignee_raw = args.get("assignee")
+            assignee = str(assignee_raw).strip()[:255] if assignee_raw else None
             due_date = _parse_iso_datetime(args.get("due_date"))
             category = args.get("category")
             if category not in VALID_CATEGORY:
@@ -188,6 +190,7 @@ def run_agent_command(query: str, current_user, db, timezone_name: str | None = 
                 due_date=due_date,
                 category=category,
                 status="todo",
+                assignee=assignee,
                 user_id=current_user.id,
             )
             db.add(task)

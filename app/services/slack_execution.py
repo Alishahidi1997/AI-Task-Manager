@@ -94,17 +94,15 @@ def execute_slack_tool(*, tool: str, arguments: dict, user: User, db: Session) -
             raise ValueError(f"invalid create_task arguments: {exc}") from exc
         if args.due_date < datetime.now(timezone.utc):
             raise PermissionError("due_date cannot be in the past")
-        lines = [f"Assignee: {args.assignee}"]
-        if args.priority:
-            lines.append(f"Priority: {args.priority}")
-        description = "\n".join(lines)
-        category = guess_category(args.title, description, args.due_date)
+        description = f"Priority: {args.priority}" if args.priority else None
+        category = guess_category(args.title, description or "", args.due_date)
         task = Task(
             title=args.title,
             description=description,
             due_date=args.due_date,
             status="todo",
             category=category if category in VALID_CATEGORY else None,
+            assignee=args.assignee,
             user_id=user.id,
         )
         db.add(task)
@@ -142,9 +140,7 @@ def execute_slack_tool(*, tool: str, arguments: dict, user: User, db: Session) -
                 raise PermissionError("due_date cannot be in the past")
             task.due_date = args.due_date
         if args.assignee is not None:
-            base = task.description or ""
-            note = f"Assignee: {args.assignee}"
-            task.description = f"{base}\n{note}".strip() if base else note
+            task.assignee = args.assignee
         db.add(task)
         db.commit()
         db.refresh(task)
@@ -170,9 +166,7 @@ def execute_slack_tool(*, tool: str, arguments: dict, user: User, db: Session) -
         task = db.query(Task).filter(Task.id == args.task_id, Task.user_id == user.id).first()
         if not task:
             raise ValueError("task not found")
-        base = task.description or ""
-        note = f"Assignee: {args.assignee}"
-        task.description = f"{base}\n{note}".strip() if base else note
+        task.assignee = args.assignee
         db.add(task)
         db.commit()
         db.refresh(task)
