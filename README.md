@@ -152,6 +152,17 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+### One-command local run (Windows)
+
+After first-time setup above (`pip install`, `copy .env.example .env`, `cd frontend && npm install`):
+
+```powershell
+.\run-app.ps1           # Docker + API + worker + frontend
+.\run-app.ps1 -Simple   # API + frontend only (SQLite)
+```
+
+Opens separate PowerShell windows for each service. Requires [Docker Desktop](https://www.docker.com/products/docker-desktop/) for the full stack.
+
 API docs: http://127.0.0.1:8000/docs
 
 ### Optional: PostgreSQL (Phase 2 Epic 1.1)

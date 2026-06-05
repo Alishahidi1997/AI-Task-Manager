@@ -112,6 +112,102 @@ def apply_task_id_from_title(
     return arguments
 
 
+def _parse_due_hint_from_text(text: str):
+    match = re.search(r"due:\s*([0-9T:\-+Z]+)", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    raw = match.group(1).strip()
+    try:
+        from datetime import datetime
+
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def resolve_task_id_for_agent_query(db, user_id: int, query: str, arguments: dict) -> int | None:
+    """
+    Resolve task_id for agent-command delete/update when the user pastes task details
+    instead of a numeric id.
+    """
+    from app.models import Task
+
+    task_id = arguments.get("task_id")
+    if task_id is not None:
+        row = db.query(Task).filter(Task.id == int(task_id), Task.user_id == user_id).first()
+        if row is not None:
+            return row.id
+
+    title_hint = arguments.get("title")
+    if title_hint:
+        found = resolve_task_id_from_title(db, user_id, str(title_hint))
+        if found is not None:
+            return found
+
+    due_hint = _parse_due_hint_from_text(query)
+    assignee_hint = None
+    assignee_match = re.search(
+        r"\bfor\s+([^\n,.:]+)",
+        query,
+        flags=re.IGNORECASE,
+    )
+    if assignee_match:
+        assignee_hint = assignee_match.group(1).strip()
+
+    meta_markers = ("category:", "due:", "todo", "in_progress", "done")
+    for line in query.splitlines():
+        candidate = line.strip().strip('"').strip("'")
+        if len(candidate) < 3:
+            continue
+        low = candidate.lower()
+        if low.startswith(("delete ", "remove ", "drop ")):
+            continue
+        if any(marker in low for marker in meta_markers) and "|" in candidate:
+            continue
+        if low in {"todo", "in_progress", "done"}:
+            continue
+
+        matches = (
+            db.query(Task)
+            .filter(Task.user_id == user_id, Task.title.ilike(f"%{candidate}%"))
+            .order_by(Task.id.desc())
+            .all()
+        )
+        if not matches:
+            continue
+        if due_hint is not None:
+            from datetime import timezone
+
+            hint = due_hint
+            if hint.tzinfo is None:
+                hint = hint.replace(tzinfo=timezone.utc)
+            for row in matches:
+                if not row.due_date:
+                    continue
+                due = row.due_date
+                if due.tzinfo is None:
+                    due = due.replace(tzinfo=timezone.utc)
+                if abs((due - hint).total_seconds()) < 120:
+                    return row.id
+        if len(matches) == 1:
+            return matches[0].id
+        return matches[0].id
+
+    if assignee_hint:
+        row = (
+            db.query(Task)
+            .filter(Task.user_id == user_id, Task.assignee.ilike(f"%{assignee_hint}%"))
+            .order_by(Task.id.desc())
+            .first()
+        )
+        if row is not None:
+            return row.id
+
+    return None
+
+
 def resolve_task_id_from_title(db, user_id: int, title_fragment: str) -> int | None:
     """Lightweight title search for entity resolution (tenant-scoped by user_id)."""
     from app.models import Task

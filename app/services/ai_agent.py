@@ -1,14 +1,70 @@
 import json
 import os
+import re
 from datetime import datetime
 
 import httpx
 
 from app.models import Task
 from app.services.category_guess import guess_category
+from app.services.entity_resolution import resolve_task_id_for_agent_query
+from app.services.rbac import allowed_tools_for_role
+from app.validation.policy_engine import enforce_policies
 
 VALID_STATUS = {"todo", "in_progress", "done"}
 VALID_CATEGORY = {"today", "this_week", "routine", "backlog"}
+_DELETE_WORDS = re.compile(r"\b(delete|remove|drop)\b", re.IGNORECASE)
+_UPDATE_WORDS = re.compile(r"\b(update|mark|complete|finish|set\s+status)\b", re.IGNORECASE)
+_CREATE_WORDS = re.compile(r"\b(create|add|new\s+task)\b", re.IGNORECASE)
+
+
+def detect_agent_intent(query: str) -> str:
+    """Primary operation implied by the user request (used to keep one tool per command)."""
+    low = query.lower()
+    delete_hit = bool(_DELETE_WORDS.search(low))
+    create_hit = bool(_CREATE_WORDS.search(low))
+    update_hit = bool(_UPDATE_WORDS.search(low))
+    if delete_hit and not create_hit:
+        return "delete"
+    if create_hit and not delete_hit:
+        return "create"
+    if update_hit and not create_hit:
+        return "update"
+    if delete_hit:
+        return "delete"
+    if update_hit:
+        return "update"
+    if create_hit:
+        return "create"
+    return "unknown"
+
+
+def _tool_name_from_call(call: dict) -> str | None:
+    return (call.get("function") or {}).get("name")
+
+
+def filter_tool_calls_for_intent(tool_calls: list[dict], intent: str) -> list[dict]:
+    """Keep only the single most relevant tool call for the detected intent."""
+    if not tool_calls:
+        return []
+    if intent == "delete":
+        matched = [c for c in tool_calls if _tool_name_from_call(c) == "delete_task"]
+        return matched[:1]
+    if intent == "create":
+        matched = [c for c in tool_calls if _tool_name_from_call(c) == "create_task"]
+        return matched[:1]
+    if intent == "update":
+        matched = [c for c in tool_calls if _tool_name_from_call(c) == "update_task"]
+        return matched[:1]
+    return tool_calls[:1]
+
+
+def _identity_context(current_user) -> dict:
+    return {
+        "user_id": current_user.id,
+        "role": current_user.role,
+        "tenant": current_user.tenant_id,
+    }
 
 
 def _parse_iso_datetime(value: str | None):
@@ -34,8 +90,9 @@ def _allowed_transition(current_status: str, next_status: str):
     return next_status in allowed.get(current_status, set())
 
 
-def _tool_spec():
-    return [
+def _tool_spec_for_role(role: str):
+    allowed = set(allowed_tools_for_role(role))
+    tools = [
         {
             "type": "function",
             "function": {
@@ -91,26 +148,80 @@ def _tool_spec():
             },
         },
     ]
+    return [tool for tool in tools if tool["function"]["name"] in allowed]
 
 
-def _ask_openai_for_tools(query: str, timezone_name: str | None, api_key: str):
+def _format_tasks_for_prompt(db, user_id: int) -> str:
+    rows = (
+        db.query(Task)
+        .filter(Task.user_id == user_id)
+        .order_by(Task.id.desc())
+        .limit(30)
+        .all()
+    )
+    if not rows:
+        return "(no tasks)"
+    lines = []
+    for task in rows:
+        due = task.due_date.isoformat() if task.due_date else "none"
+        lines.append(
+            f"- id={task.id} title={task.title!r} status={task.status} "
+            f"assignee={task.assignee or 'none'} due={due} category={task.category or 'none'}"
+        )
+    return "\n".join(lines)
+
+
+def _ask_openai_for_tools(
+    query: str,
+    timezone_name: str | None,
+    api_key: str,
+    *,
+    role: str,
+    task_catalog: str,
+    intent: str,
+):
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
     now = datetime.now().isoformat()
     tz_label = timezone_name or "unknown"
+    intent_rule = (
+        "The user wants to DELETE a task. Call delete_task only. "
+        "Pick task_id from the task catalog. Never call create_task."
+        if intent == "delete"
+        else "The user wants to CREATE a task. Call create_task only."
+        if intent == "create"
+        else "The user wants to UPDATE a task. Call update_task only. "
+        "Pick task_id from the task catalog."
+        if intent == "update"
+        else "Call exactly one tool that best matches the request."
+    )
     messages = [
         {
             "role": "system",
             "content": (
-                "You are a task operations planner. Decide which tool(s) to call for the user request. "
-                "Use tools only for task create/update/delete operations. Keep arguments minimal and valid."
+                "You are a task operations planner. Choose exactly ONE tool call per request. "
+                "Use task_id values from the user's task catalog when deleting or updating. "
+                "Do not invent tasks from pasted descriptions; pasted blocks describe an existing task. "
+                f"{intent_rule}"
             ),
         },
-        {"role": "user", "content": f"Now: {now}\nTimezone: {tz_label}\nRequest: {query}"},
+        {
+            "role": "user",
+            "content": (
+                f"Now: {now}\nTimezone: {tz_label}\n"
+                f"User role: {role}\n"
+                f"Task catalog:\n{task_catalog}\n\n"
+                f"Request: {query}"
+            ),
+        },
     ]
+    tools = _tool_spec_for_role(role)
+    if not tools:
+        return {"tool_calls": [], "content": "No tools allowed for this role."}
+
     payload = {
         "model": model,
         "messages": messages,
-        "tools": _tool_spec(),
+        "tools": tools,
         "tool_choice": "auto",
         "temperature": 0.1,
         "max_tokens": 300,
@@ -126,8 +237,7 @@ def _ask_openai_for_tools(query: str, timezone_name: str | None, api_key: str):
         )
         response.raise_for_status()
         data = response.json()
-    message = data["choices"][0]["message"]
-    return message
+    return data["choices"][0]["message"]
 
 
 def run_agent_command(query: str, current_user, db, timezone_name: str | None = None, dry_run: bool = False):
@@ -140,9 +250,31 @@ def run_agent_command(query: str, current_user, db, timezone_name: str | None = 
             "actions": [],
         }
 
-    message = _ask_openai_for_tools(query, timezone_name, api_key)
-    tool_calls = message.get("tool_calls") or []
+    intent = detect_agent_intent(query)
+    identity = _identity_context(current_user)
+    task_catalog = _format_tasks_for_prompt(db, current_user.id)
+
+    message = _ask_openai_for_tools(
+        query,
+        timezone_name,
+        api_key,
+        role=current_user.role,
+        task_catalog=task_catalog,
+        intent=intent,
+    )
+    tool_calls = filter_tool_calls_for_intent(message.get("tool_calls") or [], intent)
     actions = []
+
+    if intent == "delete" and not tool_calls:
+        return {
+            "ok": False,
+            "mode": "openai_tools",
+            "assistant_message": "Delete request could not be mapped to a task. Check task_id or title in your catalog.",
+            "actions": [{"tool": "delete_task", "ok": False, "detail": "no delete tool call returned"}],
+            "tool_calls_count": 0,
+            "dry_run": dry_run,
+            "intent": intent,
+        }
 
     for call in tool_calls:
         fn = call.get("function", {})
@@ -152,6 +284,25 @@ def run_agent_command(query: str, current_user, db, timezone_name: str | None = 
             args = json.loads(raw_args)
         except json.JSONDecodeError:
             actions.append({"tool": fn_name, "ok": False, "detail": "invalid JSON arguments"})
+            continue
+
+        if fn_name not in allowed_tools_for_role(current_user.role):
+            actions.append({"tool": fn_name, "ok": False, "detail": "tool not allowed for your role"})
+            continue
+
+        if fn_name in {"update_task", "delete_task"}:
+            resolved_id = resolve_task_id_for_agent_query(db, current_user.id, query, args)
+            if resolved_id is not None:
+                args["task_id"] = resolved_id
+            elif args.get("task_id") is None:
+                detail = "task not found; could not resolve from request"
+                actions.append({"tool": fn_name, "ok": False, "detail": detail})
+                continue
+
+        try:
+            enforce_policies(identity, fn_name, args, db=db)
+        except PermissionError as exc:
+            actions.append({"tool": fn_name, "ok": False, "detail": str(exc)})
             continue
 
         if fn_name == "create_task":
@@ -266,11 +417,13 @@ def run_agent_command(query: str, current_user, db, timezone_name: str | None = 
 
         actions.append({"tool": fn_name or "unknown", "ok": False, "detail": "unsupported tool"})
 
+    ok = bool(actions) and all(action.get("ok") for action in actions)
     return {
-        "ok": True,
+        "ok": ok,
         "mode": "openai_tools",
         "assistant_message": message.get("content") or "",
         "actions": actions,
         "tool_calls_count": len(tool_calls),
         "dry_run": dry_run,
+        "intent": intent,
     }
