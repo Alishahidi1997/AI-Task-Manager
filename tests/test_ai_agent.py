@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.database import SessionLocal
 from app.models import Task, User
 from app.services.ai_agent import (
@@ -13,6 +15,12 @@ from app.services.ai_agent import (
 )
 from app.services.entity_resolution import resolve_task_id_for_agent_query
 from tests.conftest import auth_headers_with_role
+
+
+@pytest.fixture(autouse=True)
+def _agent_openai_key(monkeypatch):
+    """CI has no .env; conftest clears OPENAI_API_KEY — agent routes need a dummy key."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
 
 def test_detect_agent_intent_prefers_delete_over_pasted_create_text():

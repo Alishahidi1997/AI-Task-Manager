@@ -5,7 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Load repo-root .env before any service reads os.environ (OPENAI_API_KEY, etc.)
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
 
 import httpx
 from fastapi import FastAPI
