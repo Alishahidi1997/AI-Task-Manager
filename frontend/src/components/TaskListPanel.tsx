@@ -42,6 +42,7 @@ export function TaskListPanel({
             {task.description ? <p>{task.description}</p> : null}
             <small>
               category: {task.category ?? "n/a"} | due: {task.due_date ?? "n/a"}
+              {task.assignee ? ` | assignee: ${task.assignee}` : ""}
             </small>
             <div className="task-actions">
               <select

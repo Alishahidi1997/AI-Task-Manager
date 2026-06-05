@@ -137,7 +137,7 @@ All **Epics 1–4** and stretch ops are implemented. Details and acceptance crit
 | 3.2 | Optional live OpenAI eval workflow in CI | **Done** (`.github/workflows/eval-live.yml`, manual dispatch) |
 | 3.3 | React `/chat` + queued job/stream UX | **Done** (chat panel; 202 auto-poll via `api.ts`) |
 | 3.4 | Redis in CI (rate limits + snapshot cache) | **Done** |
-| 3.5 | `Task.assignee` column | Planned |
+| 3.5 | `Task.assignee` column | **Done** (Alembic `003_assignee`, API + Slack/chat execution) |
 | 3.6 | `assign_task` on `/chat` | Planned |
 | 3.7 | Production hardening (webhooks, workspace limits, etc.) | Planned |
 

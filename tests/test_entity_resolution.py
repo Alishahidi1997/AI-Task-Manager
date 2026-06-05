@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.auth import hash_password
 from app.database import SessionLocal
-from app.models import User
+from app.models import Task, User
 from app.services.chat_orchestrator import PlannerOutput
 from app.services.entity_resolution import (
     apply_assignee_resolution,
@@ -132,3 +132,12 @@ def test_chat_resolves_assignee_name_before_policy(client, monkeypatch):
     body = response.json()
     assert body["status"] == "executed"
     assert body["planner_output"]["arguments"]["assignee"] == dev_email
+
+    task_id = body["result"]["task_id"]
+    db = SessionLocal()
+    try:
+        task = db.query(Task).filter(Task.id == task_id).first()
+        assert task is not None
+        assert task.assignee == dev_email
+    finally:
+        db.close()

@@ -44,7 +44,13 @@ def test_postgres_task_crud(postgres_engine):
         created = client.post(
             "/tasks",
             headers=headers,
-            json={"title": "Postgres task", "description": "via alembic", "due_date": due},
+            json={
+                "title": "Postgres task",
+                "description": "via alembic",
+                "due_date": due,
+                "assignee": "assignee@example.com",
+            },
         )
         assert created.status_code == 201, created.text
         assert created.json()["title"] == "Postgres task"
+        assert created.json()["assignee"] == "assignee@example.com"

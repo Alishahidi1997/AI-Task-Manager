@@ -8,6 +8,7 @@ export type Task = {
   status: TaskStatus;
   due_date: string | null;
   category: TaskCategory | null;
+  assignee: string | null;
 };
 
 export type DailySummaryResponse = {
@@ -345,6 +346,7 @@ export async function createTask(payload: {
   description: string | null;
   due_date: string | null;
   category?: TaskCategory | null;
+  assignee?: string | null;
 }): Promise<Task> {
   return request<Task>("/tasks", {
     method: "POST",
