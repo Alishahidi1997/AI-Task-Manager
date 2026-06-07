@@ -9,7 +9,11 @@ from app.llm.openai_client import stream_chat_completion_text
 from app.llm.openai_transport import post_chat_completion_async
 from app.models import Task
 from app.services.category_guess import guess_category
-from app.services.entity_resolution import apply_assignee_resolution, try_resolve_followup
+from app.services.entity_resolution import (
+    apply_assignee_resolution,
+    apply_task_id_from_title,
+    try_resolve_followup,
+)
 from app.services.rbac import allowed_tools_for_role
 from app.services.task_workflow import assert_status_transition
 from app.services.thread_manager import ThreadManager, api_thread_key
@@ -18,7 +22,7 @@ from app.validation.policy_engine import enforce_policies
 
 VALID_STATUS = {"todo", "in_progress", "done"}
 VALID_CATEGORY = {"today", "this_week", "routine", "backlog"}
-CHAT_TOOL_NAMES = frozenset({"create_task", "update_task", "delete_task"})
+CHAT_TOOL_NAMES = frozenset({"create_task", "update_task", "delete_task", "assign_task"})
 
 
 class CreateTaskArgs(BaseModel):
@@ -43,6 +47,11 @@ class DeleteTaskArgs(BaseModel):
     task_id: int
 
 
+class AssignTaskArgs(BaseModel):
+    task_id: int
+    assignee: str = Field(min_length=1, max_length=255)
+
+
 def _tool_registry() -> dict:
     return {
         "create_task": {
@@ -55,6 +64,10 @@ def _tool_registry() -> dict:
         },
         "delete_task": {
             "required": ["task_id"],
+            "optional": [],
+        },
+        "assign_task": {
+            "required": ["task_id", "assignee"],
             "optional": [],
         },
     }
@@ -77,6 +90,8 @@ def _validate_tool_output(payload: PlannerOutput):
         if parsed.status is not None and parsed.status not in VALID_STATUS:
             raise ValueError("invalid status")
         return parsed
+    if payload.tool_name == "assign_task":
+        return AssignTaskArgs(**payload.arguments)
     return DeleteTaskArgs(**payload.arguments)
 
 
@@ -192,6 +207,18 @@ def _complete_after_plan(
             "raw_planner_output": raw_output,
         }
 
+    if db is not None:
+        merged_args = apply_task_id_from_title(
+            db,
+            current_user.id,
+            planner_output.tool_name,
+            planner_output.arguments,
+            message,
+        )
+        if merged_args != planner_output.arguments:
+            planner_output = planner_output.model_copy(update={"arguments": merged_args})
+            raw_output = planner_output.model_dump()
+
     tenant = identity_ctx.get("tenant")
     if db is not None and tenant:
         merged_args, assignee_clarify = apply_assignee_resolution(
@@ -290,6 +317,21 @@ def _execute(tool_name: str, args, current_user, db, *, allow_compact_done_trans
         db.commit()
         db.refresh(task)
         return {"tool_name": tool_name, "task_id": task.id, "status": task.status}
+
+    if tool_name == "assign_task":
+        task = db.query(Task).filter(Task.id == args.task_id, Task.user_id == current_user.id).first()
+        if not task:
+            raise ValueError("task not found")
+        task.assignee = args.assignee
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+        return {
+            "tool_name": tool_name,
+            "task_id": task.id,
+            "status": task.status,
+            "assignee": task.assignee,
+        }
 
     task = db.query(Task).filter(Task.id == args.task_id, Task.user_id == current_user.id).first()
     if not task:

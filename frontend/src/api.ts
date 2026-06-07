@@ -564,6 +564,7 @@ export type ChatOrchestrationResult = {
     tool_name?: string;
     task_id?: number;
     status?: string;
+    assignee?: string;
   };
 };
 

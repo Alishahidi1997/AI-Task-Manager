@@ -138,7 +138,7 @@ All **Epics 1–4** and stretch ops are implemented. Details and acceptance crit
 | 3.3 | React `/chat` + queued job/stream UX | **Done** (chat panel; 202 auto-poll via `api.ts`) |
 | 3.4 | Redis in CI (rate limits + snapshot cache) | **Done** |
 | 3.5 | `Task.assignee` column | **Done** (Alembic `003_assignee`, API + Slack/chat execution) |
-| 3.6 | `assign_task` on `/chat` | Planned |
+| 3.6 | `assign_task` on `/chat` | **Done** (manager/admin; assignee resolution + `Task.assignee`) |
 | 3.7 | Production hardening (webhooks, workspace limits, etc.) | Planned |
 
 ---

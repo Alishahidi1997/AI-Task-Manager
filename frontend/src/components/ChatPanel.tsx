@@ -23,7 +23,10 @@ function formatChatResponse(body: ChatOrchestrationResult): string {
     const tool = body.planner_output?.tool_name ?? body.result.tool_name ?? "action";
     const taskId = body.result.task_id;
     const taskStatus = body.result.status;
-    return `Done — ${tool}${taskId != null ? ` (task #${taskId}, ${taskStatus})` : ""}.`;
+    const assignee =
+      typeof body.result.assignee === "string" ? body.result.assignee : null;
+    const assigneeNote = assignee ? `, assignee: ${assignee}` : "";
+    return `Done — ${tool}${taskId != null ? ` (task #${taskId}, ${taskStatus}${assigneeNote})` : ""}.`;
   }
   if (body.status === "clarification_required") {
     return body.question ?? "I need more information to continue.";
