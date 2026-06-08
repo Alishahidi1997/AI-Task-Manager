@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
+from app.services.rbac import role_rank
+
 # Max extension of an existing due date (days) by role when updating a task.
 DUE_DATE_SLIP_DAYS = {
     "employee": 14,
@@ -21,20 +23,61 @@ def _parse_due_date(value) -> datetime:
     return parsed
 
 
-def _assert_assignee_in_tenant(db: Session, tenant: str, assignee: str) -> None:
+def _find_tenant_user(db: Session, tenant: str, assignee: str):
     from app.models import User
 
     needle = assignee.strip().lower()
     if not needle:
-        raise PermissionError("assignee is required")
-
+        return None
     rows = db.query(User).filter(User.tenant_id == tenant).all()
     for user in rows:
         if user.email.lower() == needle:
-            return
+            return user
         if user.slack_user_id and user.slack_user_id.lower() == needle:
-            return
-    raise PermissionError("assignee must be a user in your tenant")
+            return user
+    return None
+
+
+def _assert_assignee_in_tenant(db: Session, tenant: str, assignee: str) -> None:
+    if not assignee.strip():
+        raise PermissionError("assignee is required")
+    if _find_tenant_user(db, tenant, assignee) is None:
+        raise PermissionError("assignee must be a user in your tenant")
+
+
+def _assert_actor_may_target_assignee(
+    db: Session,
+    tenant: str,
+    actor_role: str,
+    assignee: str,
+) -> None:
+    """Lower-ranked users cannot create/update/delete/assign work for higher-ranked users."""
+    if role_rank(actor_role) >= role_rank("admin"):
+        return
+    target = _find_tenant_user(db, tenant, str(assignee))
+    if target is None:
+        return
+    if role_rank(target.role) > role_rank(actor_role):
+        raise PermissionError(
+            "cannot modify or assign tasks for users above your role in the organization"
+        )
+
+
+def _assert_actor_may_modify_task(
+    db: Session,
+    tenant: str,
+    actor_role: str,
+    user_id: int,
+    task_id: int | None,
+) -> None:
+    from app.models import Task
+
+    if task_id is None:
+        return
+    task = db.query(Task).filter(Task.id == int(task_id), Task.user_id == user_id).first()
+    if task is None or not task.assignee:
+        return
+    _assert_actor_may_target_assignee(db, tenant, actor_role, task.assignee)
 
 
 def _assert_due_date_slip(
@@ -85,6 +128,12 @@ def enforce_policies(
             raise PermissionError("only managers/admins can assign tasks")
         if db is not None:
             _assert_assignee_in_tenant(db, tenant, str(assignee))
+            _assert_actor_may_target_assignee(db, tenant, role, str(assignee))
+
+    if tool in {"update_task", "delete_task", "assign_task"} and db is not None and user_id is not None:
+        task_id = arguments.get("task_id")
+        if task_id is not None:
+            _assert_actor_may_modify_task(db, tenant, role, int(user_id), int(task_id))
 
     due_date = arguments.get("due_date")
     if due_date:

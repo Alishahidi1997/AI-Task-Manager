@@ -4,6 +4,17 @@ ROLE_TOOL_ALLOWLIST = {
     "admin": {"create_task", "update_task", "assign_task", "delete_task"},
 }
 
+# Higher rank = more authority in tenant (used by semantic policy).
+ROLE_RANK = {
+    "employee": 1,
+    "manager": 2,
+    "admin": 3,
+}
+
+
+def role_rank(role: str | None) -> int:
+    return ROLE_RANK.get((role or "employee").strip().lower(), ROLE_RANK["employee"])
+
 
 def allowed_tools_for_role(role: str) -> list[str]:
     key = (role or "employee").strip().lower()
