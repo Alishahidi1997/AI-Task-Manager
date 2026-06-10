@@ -9,6 +9,7 @@ from app.models import Task, User, utcnow
 from app.schemas import Status, TaskCreate, TaskOut, TaskUpdate
 from app.services.category_guess import guess_category
 from app.services.task_workflow import assert_status_transition
+from app.services.workspace_limits import assert_can_create_task
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -26,6 +27,11 @@ def create_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    try:
+        assert_can_create_task(db, current_user.id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
     cat = payload.category
     if cat is None:
         cat = guess_category(payload.title, payload.description or "", payload.due_date)

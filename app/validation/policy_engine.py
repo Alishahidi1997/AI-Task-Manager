@@ -155,5 +155,10 @@ def enforce_policies(
     if arguments.get("priority") == "high" and role not in {"manager", "admin"}:
         raise PermissionError("high priority tasks require manager or admin role")
 
+    if tool == "create_task" and db is not None and user_id is not None:
+        from app.services.workspace_limits import assert_can_create_task
+
+        assert_can_create_task(db, int(user_id))
+
     if tool == "admin_tools":
         raise PermissionError("admin_tools is not available in this build")
