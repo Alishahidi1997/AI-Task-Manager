@@ -18,6 +18,10 @@ def _slack_limit() -> int:
     return int(os.getenv("RATE_LIMIT_SLACK_PER_MINUTE", "60"))
 
 
+def _tenant_ai_hourly_limit() -> int:
+    return int(os.getenv("WORKSPACE_AI_REQUESTS_PER_HOUR", "0"))
+
+
 def rate_limit_enabled() -> bool:
     flag = os.getenv("RATE_LIMIT_ENABLED", "true").strip().lower()
     return flag not in {"0", "false", "no", "off"}
@@ -78,6 +82,17 @@ async def enforce_slack_rate_limit(
         allowed_u, retry_u = await _consume_slot(redis, key_user, _slack_limit(), _window_seconds())
         if not allowed_u:
             raise _too_many_requests(retry_u, scope="slack")
+
+
+async def enforce_tenant_ai_rate_limit(redis, tenant_id: str) -> None:
+    """Optional per-tenant cap on AI/orchestration endpoints (hourly window)."""
+    limit = _tenant_ai_hourly_limit()
+    if limit <= 0 or redis is None or not rate_limit_enabled():
+        return
+    key = f"ratelimit:ai:tenant:{tenant_id}"
+    allowed, retry_after = await _consume_slot(redis, key, limit, 3600)
+    if not allowed:
+        raise _too_many_requests(retry_after, scope=f"tenant ai ({tenant_id})")
 
 
 async def bump_stat(redis, stat_key: str) -> None:

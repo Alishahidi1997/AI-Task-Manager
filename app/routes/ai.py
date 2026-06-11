@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
+from app.deps import get_redis
 from app.models import User
+from app.services.rate_limit import enforce_tenant_ai_rate_limit
 from app.queue.config import llm_queue_enabled
 from app.services.ai_agent import run_agent_command
 from app.services.ai_parse import parse_task_text, plan_task_text
@@ -49,12 +51,19 @@ def _queued_response(job_id: str, *, label: str) -> JSONResponse:
     )
 
 
+async def _enforce_ai_tenant_limit(redis, current_user: User) -> None:
+    tenant_id = current_user.tenant_id or f"user-{current_user.id}"
+    await enforce_tenant_ai_rate_limit(redis, tenant_id)
+
+
 @router.post("/parse-task")
 async def parse_task(
     payload: ParseTaskIn,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    redis=Depends(get_redis),
 ):
+    await _enforce_ai_tenant_limit(redis, current_user)
     if llm_queue_enabled():
         try:
             job_id = await enqueue_ai_parse(
@@ -78,7 +87,9 @@ async def plan_task(
     payload: PlanTaskIn,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    redis=Depends(get_redis),
 ):
+    await _enforce_ai_tenant_limit(redis, current_user)
     if llm_queue_enabled():
         try:
             job_id = await enqueue_ai_plan(
@@ -103,7 +114,9 @@ async def agent_command(
     payload: AgentCommandIn,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    redis=Depends(get_redis),
 ):
+    await _enforce_ai_tenant_limit(redis, current_user)
     if llm_queue_enabled():
         try:
             job_id = await enqueue_ai_agent(
