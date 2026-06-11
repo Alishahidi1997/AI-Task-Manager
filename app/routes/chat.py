@@ -14,7 +14,8 @@ from app.queue.config import chat_stream_queue_enabled, llm_queue_enabled
 from app.services.chat_orchestrator import orchestrate_chat, orchestrate_chat_stream, orchestrate_clarify
 from app.services.llm_queue_enqueue import enqueue_chat_orchestration, enqueue_chat_stream
 from app.services.audit_utils import audit_validation_result
-from app.services.rate_limit import bump_stat, enforce_chat_rate_limit
+from app.services.rate_limit import bump_stat, enforce_chat_rate_limit, enforce_tenant_ai_rate_limit
+from app.services.webhooks import build_execution_payload, emit_execution_webhook
 
 router = APIRouter(tags=["chat"])
 
@@ -42,8 +43,9 @@ async def chat(
     http_client: httpx.AsyncClient = Depends(get_http_client),
     redis=Depends(get_redis),
 ):
-    tenant_id = f"user-{current_user.id}"
+    tenant_id = current_user.tenant_id or f"user-{current_user.id}"
     await bump_stat(redis, "stats:chat_requests")
+    await enforce_tenant_ai_rate_limit(redis, tenant_id)
     await enforce_chat_rate_limit(redis, current_user.id)
 
     if llm_queue_enabled():
@@ -92,7 +94,25 @@ async def chat(
         db.add(row)
         db.commit()
         db.refresh(row)
+        if result.get("status") == "executed":
+            planner = result.get("planner_output") or {}
+            await emit_execution_webhook(
+                http_client,
+                build_execution_payload(
+                    event="orchestration.executed",
+                    channel="chat",
+                    user_id=current_user.id,
+                    tenant_id=tenant_id,
+                    request_text=payload.message,
+                    tool_name=planner.get("tool_name"),
+                    arguments=planner.get("arguments"),
+                    result=result.get("result"),
+                    audit_id=row.id,
+                ),
+            )
         return {"audit_id": row.id, **result}
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except Exception as exc:
         row = AuditLog(
             request_text=payload.message,

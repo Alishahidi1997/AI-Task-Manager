@@ -22,6 +22,7 @@ from app.orchestration.tool_registry import filter_tools, tool_schema_map
 from app.services.rbac import allowed_tools_for_role
 from app.services.slack_bot_client import chat_post_message, slack_bot_token
 from app.services.slack_execution import execute_slack_tool
+from app.services.webhooks import build_execution_payload, emit_execution_webhook
 from app.services.slack_idempotency import (
     claim_slack_event,
     duplicate_slack_response,
@@ -586,6 +587,20 @@ async def _orchestrate_slack_message_after_user_map(
         slack_user_id=slack_user_id,
         outcome="executed",
         audit_log_id=row.id,
+    )
+    await emit_execution_webhook(
+        http_client,
+        build_execution_payload(
+            event="orchestration.executed",
+            channel="slack",
+            user_id=user.id,
+            tenant_id=tenant_id,
+            request_text=text,
+            tool_name=validated_plan.tool_name,
+            arguments=validated_plan.arguments,
+            result=exec_result,
+            audit_id=row.id,
+        ),
     )
 
     body = {

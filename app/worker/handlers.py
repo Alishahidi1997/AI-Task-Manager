@@ -118,6 +118,25 @@ async def _run_chat_job(message: dict) -> dict:
             request_text=request_text,
             result=result,
         )
+        if result.get("status") == "executed":
+            from app.services.webhooks import build_execution_payload, emit_execution_webhook
+
+            planner = result.get("planner_output") or {}
+            async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as webhook_client:
+                await emit_execution_webhook(
+                    webhook_client,
+                    build_execution_payload(
+                        event="orchestration.executed",
+                        channel="chat",
+                        user_id=user_id,
+                        tenant_id=tenant_id,
+                        request_text=request_text,
+                        tool_name=planner.get("tool_name"),
+                        arguments=planner.get("arguments"),
+                        result=result.get("result"),
+                        audit_id=audit_id,
+                    ),
+                )
         if job_row:
             mark_job_completed(db, job_row, result={**result, "audit_id": audit_id}, audit_log_id=audit_id)
         return {**result, "audit_id": audit_id}
