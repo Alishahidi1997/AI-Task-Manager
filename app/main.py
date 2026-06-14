@@ -31,10 +31,13 @@ from app.routes.tasks import router as tasks_router
 from app.services.category_guess import guess_category
 from app.services.demo_seed import reset_demo_dataset
 from app.scheduler import start_scheduler
+from app.services.production import validate_production_settings
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_production_settings()
+
     # import models so sqlalchemy knows about the tables
     from app import models  # noqa: F401
 

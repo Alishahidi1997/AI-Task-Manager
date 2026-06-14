@@ -139,7 +139,7 @@ All **Epics 1–4** and stretch ops are implemented. Details and acceptance crit
 | 3.4 | Redis in CI (rate limits + snapshot cache) | **Done** |
 | 3.5 | `Task.assignee` column | **Done** (Alembic `003_assignee`, API + Slack/chat execution) |
 | 3.6 | `assign_task` on `/chat` | **Done** (manager/admin; assignee resolution + `Task.assignee`) |
-| 3.7 | Production hardening (webhooks, workspace limits, etc.) | Planned |
+| 3.7 | Production hardening (webhooks, workspace limits, etc.) | **Done** (quotas, tenant AI rate limit, signed webhooks, `APP_ENV=production` guards) |
 
 ---
 
@@ -212,6 +212,13 @@ uvicorn app.main:app --reload
 Tune via `.env.example`: `RATE_LIMIT_CHAT_PER_MINUTE`, `RATE_LIMIT_SLACK_PER_MINUTE`, `INSIGHTS_SNAPSHOT_CACHE_SECONDS`. Set `RATE_LIMIT_ENABLED=false` to keep Redis for stats/cache only.
 
 CI: `RUN_REDIS_INTEGRATION=1 REDIS_URL=redis://localhost:6379/0 python -m pytest tests/test_redis_integration.py`
+
+### Production hardening (Phase 3.7)
+
+- **Workspace limits:** `WORKSPACE_MAX_TASKS_PER_USER`, `WORKSPACE_MAX_OPEN_TASKS_PER_USER` (0 = unlimited)
+- **Tenant AI cap:** `WORKSPACE_AI_REQUESTS_PER_HOUR` with Redis rate limiting on `/chat` and `/ai/*`
+- **Outbound webhooks:** `WEBHOOK_URL` + optional `WEBHOOK_SECRET` (HMAC `sha256` signature header) on successful chat/Slack execution
+- **Production boot guard:** `APP_ENV=production` requires a strong `JWT_SECRET_KEY` and `OPENAI_API_KEY`
 
 ### Tests
 
