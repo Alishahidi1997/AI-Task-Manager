@@ -76,7 +76,7 @@ The model suggests, the system decides.
 
 ### Insights Engine
 
-- Productivity tracking (completion patterns, delays)c
+- Productivity tracking (completion patterns, delays)
 - Priority analysis (overdue and high-risk tasks)
 - Anomaly detection across user behavior
 - Next-action recommendations
@@ -116,7 +116,7 @@ Unlike typical LLM wrapper applications:
 
 ## Phase 2 (implementation roadmap)
 
-All **Epics 1–4** and stretch ops are implemented. Details and acceptance criteria live in **`project.md` → Phase 2: Production-Ready** (local design doc).
+All **Epics 1–4** and stretch ops are implemented. Design details: **`docs/DESIGN.md`** (tracked on GitHub); extended notes in local **`project.md`**.
 
 | Epic | Status |
 | --- | --- |
@@ -129,11 +129,11 @@ All **Epics 1–4** and stretch ops are implemented. Details and acceptance crit
 
 ---
 
-## Phase 3 (backlog)
+## Phase 3 (complete)
 
 | ID | Item | Status |
 | --- | --- | --- |
-| 3.1 | Sync design docs with shipped Phase 2 | Partial (see `project.md`; intro updated) |
+| 3.1 | Sync design docs with shipped Phase 2–3 | **Done** (`docs/DESIGN.md`, `project.md`, README) |
 | 3.2 | Optional live OpenAI eval workflow in CI | **Done** (`.github/workflows/eval-live.yml`, manual dispatch) |
 | 3.3 | React `/chat` + queued job/stream UX | **Done** (chat panel; 202 auto-poll via `api.ts`) |
 | 3.4 | Redis in CI (rate limits + snapshot cache) | **Done** |
