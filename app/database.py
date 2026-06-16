@@ -75,6 +75,8 @@ def migrate_sqlite(bind: Engine) -> None:
         if "tenant_id" not in user_cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN tenant_id VARCHAR(128)"))
             conn.execute(text("UPDATE users SET tenant_id = 'default' WHERE tenant_id IS NULL OR tenant_id = ''"))
+        if "display_name" not in user_cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN display_name VARCHAR(128)"))
 
         rows = conn.execute(text("PRAGMA table_info(tasks)")).fetchall()
         col_names = {r[1] for r in rows}

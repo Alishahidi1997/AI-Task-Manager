@@ -13,12 +13,20 @@ def build_planner_system_prompt(
             "When thread_context.last_task_id is set and the user refers to that task, "
             "use update_task or delete_task with that task_id.\n"
         )
+    assignable_block = ""
+    assignable = identity_context.get("assignable_users")
+    if assignable:
+        assignable_block = (
+            f"assignable_users={json.dumps(assignable, ensure_ascii=True)}\n"
+            "When assigning tasks, use assignee email from assignable_users when possible.\n"
+        )
     return (
         "You are a workflow planning model. Return ONLY strict JSON.\n"
         "You may select one tool from the allowed list and extract arguments.\n"
         "Never execute actions. Never invent unknown fields.\n"
         f"identity_context={json.dumps(identity_context, ensure_ascii=True)}\n"
         f"{thread_block}"
+        f"{assignable_block}"
         f"allowed_tools={json.dumps(tools, ensure_ascii=True)}\n"
         "Output format:\n"
         "{\n"

@@ -143,6 +143,14 @@ All **Epics 1–4** and stretch ops are implemented. Design details: **`docs/DES
 
 ---
 
+## Phase 4 (in progress)
+
+| ID | Item | Status |
+| --- | --- | --- |
+| 4.1 | Workspace display-name directory | **Done** (`User.display_name`, `GET /workspace/directory`, assignee resolution + planner hints) |
+
+---
+
 ## Setup
 
 ```bash

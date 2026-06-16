@@ -223,6 +223,13 @@ async def _orchestrate_slack_message_after_user_map(
         "tenant": user.tenant_id,
         "allowed_tools": allowed,
     }
+    role = (user.role or "employee").strip().lower()
+    if role in {"manager", "admin"}:
+        from app.services.user_directory import planner_assignable_users
+
+        assignable = planner_assignable_users(db, tenant_id)
+        if assignable:
+            identity_context["assignable_users"] = assignable
     thread_mgr = ThreadManager(db, user.id)
     thread_row = thread_mgr.load(
         slack_thread_key(

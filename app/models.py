@@ -45,6 +45,7 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     role = Column(String(64), nullable=False, default="employee")
     tenant_id = Column(String(128), nullable=False, default="default")
+    display_name = Column(String(128), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 

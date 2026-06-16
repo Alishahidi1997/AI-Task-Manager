@@ -28,6 +28,7 @@ from app.routes.insights import router as insights_router
 from app.routes.slack import router as slack_router
 from app.routes.summary import router as summary_router
 from app.routes.tasks import router as tasks_router
+from app.routes.workspace import router as workspace_router
 from app.services.category_guess import guess_category
 from app.services.demo_seed import reset_demo_dataset
 from app.scheduler import start_scheduler
@@ -113,6 +114,7 @@ app.add_middleware(
 app.add_middleware(PrometheusMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 app.include_router(tasks_router)
+app.include_router(workspace_router)
 app.include_router(summary_router)
 app.include_router(insights_router)
 app.include_router(auth_router)

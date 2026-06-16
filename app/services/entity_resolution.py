@@ -248,32 +248,10 @@ def extract_assignee_from_message(message: str) -> str | None:
 
 
 def find_assignee_candidates(db, tenant_id: str, hint: str):
-    """Match assignee hints against tenant users by email local-part or slack id."""
-    from app.models import User
+    """Match assignee hints against tenant users (delegates to user_directory)."""
+    from app.services.user_directory import find_assignee_candidates as _find
 
-    needle = hint.strip().lower()
-    if not needle:
-        return []
-
-    rows = db.query(User).filter(User.tenant_id == tenant_id).all()
-    if _looks_like_email(needle):
-        return [user for user in rows if user.email.lower() == needle]
-
-    exact: list = []
-    prefix: list = []
-    for user in rows:
-        if user.slack_user_id and user.slack_user_id.lower() == needle:
-            exact.append(user)
-            continue
-        local = _email_local(user.email)
-        if local == needle:
-            exact.append(user)
-        elif local.startswith(needle):
-            prefix.append(user)
-
-    if exact:
-        return list({user.id: user for user in exact}.values())
-    return list({user.id: user for user in prefix}.values())
+    return _find(db, tenant_id, hint)
 
 
 def apply_assignee_resolution(

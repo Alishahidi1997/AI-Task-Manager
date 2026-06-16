@@ -24,18 +24,9 @@ def _parse_due_date(value) -> datetime:
 
 
 def _find_tenant_user(db: Session, tenant: str, assignee: str):
-    from app.models import User
+    from app.services.user_directory import find_tenant_user
 
-    needle = assignee.strip().lower()
-    if not needle:
-        return None
-    rows = db.query(User).filter(User.tenant_id == tenant).all()
-    for user in rows:
-        if user.email.lower() == needle:
-            return user
-        if user.slack_user_id and user.slack_user_id.lower() == needle:
-            return user
-    return None
+    return find_tenant_user(db, tenant, assignee)
 
 
 def _assert_assignee_in_tenant(db: Session, tenant: str, assignee: str) -> None:

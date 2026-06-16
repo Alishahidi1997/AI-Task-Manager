@@ -95,14 +95,22 @@ def _validate_tool_output(payload: PlannerOutput):
     return DeleteTaskArgs(**payload.arguments)
 
 
-def _build_identity_context(user):
+def _build_identity_context(user, db=None):
     role = (user.role or "employee").strip().lower()
-    return {
+    tenant = user.tenant_id or f"user-{user.id}"
+    ctx = {
         "user_id": user.id,
-        "tenant_id": user.tenant_id or f"user-{user.id}",
+        "tenant_id": tenant,
         "role": role,
-        "tenant": user.tenant_id or f"user-{user.id}",
+        "tenant": tenant,
     }
+    if db is not None and role in {"manager", "admin"}:
+        from app.services.user_directory import planner_assignable_users
+
+        assignable = planner_assignable_users(db, tenant)
+        if assignable:
+            ctx["assignable_users"] = assignable
+    return ctx
 
 
 def _policy_context(identity_ctx: dict) -> dict:
@@ -349,7 +357,7 @@ async def orchestrate_chat(
     db,
     http_client: httpx.AsyncClient,
 ):
-    identity_ctx = _build_identity_context(current_user)
+    identity_ctx = _build_identity_context(current_user, db)
     tool_registry = _chat_tool_registry_for_user(current_user)
 
     thread_row = None
@@ -415,7 +423,7 @@ def orchestrate_clarify(
 
     arguments = dict(planner_data.get("arguments") or {})
     missing = list(planner_data.get("missing_required") or [])
-    identity_ctx = _build_identity_context(current_user)
+    identity_ctx = _build_identity_context(current_user, db)
     if missing:
         field = missing.pop(0)
         value = answer.strip()
@@ -459,7 +467,7 @@ async def orchestrate_chat_stream(
     http_client: httpx.AsyncClient,
 ):
     """SSE-style stream: start → planner_token chunks → final result object."""
-    identity_ctx = _build_identity_context(current_user)
+    identity_ctx = _build_identity_context(current_user, db)
     tool_registry = _chat_tool_registry_for_user(current_user)
     thread_row = None
     thread_mgr = None
