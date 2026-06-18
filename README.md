@@ -148,6 +148,7 @@ All **Epics 1–4** and stretch ops are implemented. Design details: **`docs/DES
 | ID | Item | Status |
 | --- | --- | --- |
 | 4.1 | Workspace display-name directory | **Done** (`User.display_name`, `GET /workspace/directory`, assignee resolution + planner hints) |
+| 4.2 | Structured JSON HTTP request logs | **Done** (`HTTP_LOG_JSON`, one JSON line per request; default in production) |
 
 ---
 
@@ -227,6 +228,12 @@ CI: `RUN_REDIS_INTEGRATION=1 REDIS_URL=redis://localhost:6379/0 python -m pytest
 - **Tenant AI cap:** `WORKSPACE_AI_REQUESTS_PER_HOUR` with Redis rate limiting on `/chat` and `/ai/*`
 - **Outbound webhooks:** `WEBHOOK_URL` + optional `WEBHOOK_SECRET` (HMAC `sha256` signature header) on successful chat/Slack execution
 - **Production boot guard:** `APP_ENV=production` requires a strong `JWT_SECRET_KEY` and `OPENAI_API_KEY`
+
+### Observability (Phase 4.2)
+
+- **HTTP logs:** one line per request via `RequestLoggingMiddleware`
+- Set `HTTP_LOG_JSON=true` for JSON lines (`event`, `request_id`, `method`, `path`, `status_code`, `duration_ms`)
+- When `APP_ENV=production`, JSON logging is on by default (override with `HTTP_LOG_JSON=false`)
 
 ### Tests
 
