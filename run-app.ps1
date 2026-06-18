@@ -112,7 +112,26 @@ if (-not (Test-Path ".\frontend\node_modules")) {
 }
 
 $envLines = @(
-    'if (Test-Path ''.env'') { Get-Content ''.env'' | ForEach-Object { if ($_ -match ''^\s*([^#][^=]+)=(.*)$'') { [Environment]::SetEnvironmentVariable($matches[1].Trim(), $matches[2].Trim(), ''Process'') } } }'
+    @'
+function Import-ChildDotEnv {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return }
+    $dq = [char]34
+    Get-Content $Path | ForEach-Object {
+        $line = $_
+        if ($line -match '^\s*#' -or $line -match '^\s*$') { return }
+        if ($line -match '^\s*([^=]+)=(.*)$') {
+            $name = $matches[1].Trim()
+            $value = $matches[2].Trim()
+            if ($value.Length -ge 2 -and $value[0] -eq $dq -and $value[-1] -eq $dq) {
+                $value = $value.Substring(1, $value.Length - 2)
+            }
+            [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+        }
+    }
+}
+Import-ChildDotEnv '.env'
+'@
 )
 Add-EnvLine -Name '$env:JWT_SECRET_KEY' -Value $env:JWT_SECRET_KEY
 Add-EnvLine -Name '$env:DEMO_MODE' -Value $env:DEMO_MODE

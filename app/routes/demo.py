@@ -1,5 +1,3 @@
-import os
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -13,6 +11,7 @@ from app.services.demo_seed import (
     reset_demo_dataset,
 )
 from app.services.persona_dashboard import build_persona_dashboard
+from app.services.production import demo_mode_enabled
 
 VALID_PERSONA_ROLES = frozenset({"manager", "analyst", "executive"})
 
@@ -22,8 +21,7 @@ DEMO_EMAIL = "demo@smarttracker.local"
 
 
 def _assert_demo_access(current_user: User):
-    demo_mode = os.getenv("DEMO_MODE", "false").strip().lower() == "true"
-    if not demo_mode:
+    if not demo_mode_enabled():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="demo mode is disabled",

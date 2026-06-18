@@ -11,6 +11,12 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture(scope="session")
 def test_environment(tmp_path_factory) -> Generator[None, None, None]:
+    from pathlib import Path
+
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
+
     db_path = tmp_path_factory.mktemp("db") / "pytest.sqlite3"
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
     os.environ["DISABLE_SCHEDULER"] = "1"
@@ -19,7 +25,8 @@ def test_environment(tmp_path_factory) -> Generator[None, None, None]:
     # Keep API tests on sync /chat unless a test opts in; do not strip RABBITMQ_URL
     # (CI sets it for test_rabbitmq_integration.py — popping caused KeyError in that job).
     os.environ["LLM_QUEUE_ENABLED"] = "false"
-    os.environ.pop("OPENAI_API_KEY", None)
+    if os.getenv("RUN_AI_LIVE", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        os.environ.pop("OPENAI_API_KEY", None)
     # Keep REDIS_URL for CI integration job (test_redis_integration.py).
     yield
 

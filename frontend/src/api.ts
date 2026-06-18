@@ -314,14 +314,35 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (authToken) {
     headers.set("Authorization", `Bearer ${authToken}`);
   }
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
-  if (!response.ok) {
-    throw new Error(`${init?.method ?? "GET"} ${path} failed (${response.status})`);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  } catch (err) {
+    const hint =
+      err instanceof TypeError
+        ? ` (is the API running at ${API_BASE_URL}?)`
+        : "";
+    throw new Error(`Network error calling ${path}${hint}`);
   }
-  if (response.status === 204) {
+  const raw = await response.text();
+  if (!response.ok) {
+    let detail = raw || `${response.status}`;
+    try {
+      const parsed = JSON.parse(raw) as { detail?: unknown };
+      if (typeof parsed.detail === "string") {
+        detail = parsed.detail;
+      } else if (parsed.detail != null) {
+        detail = JSON.stringify(parsed.detail);
+      }
+    } catch {
+      // keep raw body
+    }
+    throw new Error(`${init?.method ?? "GET"} ${path} failed (${response.status}): ${detail}`);
+  }
+  if (response.status === 204 || !raw) {
     return undefined as T;
   }
-  const body = (await response.json()) as T | QueuedAcceptResponse;
+  const body = JSON.parse(raw) as T | QueuedAcceptResponse;
   if (response.status === 202 && body && typeof body === "object" && "job_id" in body) {
     return pollJobResult<T>((body as QueuedAcceptResponse).job_id);
   }
