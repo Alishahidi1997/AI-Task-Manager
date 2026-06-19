@@ -69,6 +69,21 @@ export type InsightExplanationResponse = {
 export type AuthUser = {
   id: number;
   email: string;
+  role: string;
+  tenant_id: string;
+  display_name: string;
+};
+
+export type WorkspaceDirectoryUser = {
+  id: number;
+  email: string;
+  display_name: string;
+  role: string;
+};
+
+export type WorkspaceDirectoryResponse = {
+  tenant_id: string;
+  users: WorkspaceDirectoryUser[];
 };
 
 export type AuthResponse = {
@@ -531,6 +546,20 @@ export async function login(email: string, password: string): Promise<AuthRespon
 
 export async function getMe(): Promise<AuthUser> {
   return request<AuthUser>("/auth/me");
+}
+
+export async function updateProfile(payload: {
+  display_name?: string | null;
+}): Promise<AuthUser> {
+  return request<AuthUser>("/auth/me", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getWorkspaceDirectory(): Promise<WorkspaceDirectoryResponse> {
+  return request<WorkspaceDirectoryResponse>("/workspace/directory");
 }
 
 export async function resetDemoData(): Promise<{ ok: boolean; seeded_tasks: number }> {

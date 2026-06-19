@@ -20,6 +20,9 @@ type TaskComposerPanelProps = {
   title: string;
   description: string;
   dueDate: string;
+  assignee: string;
+  showAssignee: boolean;
+  workspaceMembers: Array<{ email: string; display_name: string }>;
   creating: boolean;
   onAiInputChange: (value: string) => void;
   onAiParse: () => Promise<void>;
@@ -29,6 +32,7 @@ type TaskComposerPanelProps = {
   onTitleChange: (value: string) => void;
   onDescriptionChange: (value: string) => void;
   onDueDateChange: (value: string) => void;
+  onAssigneeChange: (value: string) => void;
 };
 
 export function TaskComposerPanel({
@@ -44,6 +48,9 @@ export function TaskComposerPanel({
   title,
   description,
   dueDate,
+  assignee,
+  showAssignee,
+  workspaceMembers,
   creating,
   onAiInputChange,
   onAiParse,
@@ -53,6 +60,7 @@ export function TaskComposerPanel({
   onTitleChange,
   onDescriptionChange,
   onDueDateChange,
+  onAssigneeChange,
 }: TaskComposerPanelProps) {
   return (
     <>
@@ -125,6 +133,19 @@ export function TaskComposerPanel({
               onChange={(e) => onDueDateChange(e.target.value)}
             />
           </label>
+          {showAssignee ? (
+            <label>
+              Assignee
+              <select value={assignee} onChange={(e) => onAssigneeChange(e.target.value)}>
+                <option value="">Unassigned</option>
+                {workspaceMembers.map((member) => (
+                  <option key={member.email} value={member.email}>
+                    {member.display_name} ({member.email})
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <button type="submit" disabled={creating}>
             {creating ? "Creating..." : "Add task"}
           </button>

@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import "./App.css";
 import {
   getMe,
+  getWorkspaceDirectory,
   hasAuthToken,
   createTask,
   deleteTask,
@@ -29,6 +30,7 @@ import {
   register,
   resetDemoData,
   setAuthToken,
+  updateProfile,
   updateTaskStatus,
 } from "./api";
 import { AuthPanel } from "./components/AuthPanel";
@@ -137,6 +139,12 @@ function App() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [assignee, setAssignee] = useState("");
+  const [workspaceMembers, setWorkspaceMembers] = useState<
+    Array<{ email: string; display_name: string }>
+  >([]);
+  const [profileDisplayName, setProfileDisplayName] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
   const [creating, setCreating] = useState(false);
   const [updatingTaskId, setUpdatingTaskId] = useState<number | null>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<number | null>(null);
@@ -207,6 +215,21 @@ function App() {
 
   const isAuthenticated = currentUser !== null;
   const isDemoUser = currentUser?.email === "demo@smarttracker.local";
+  const canAssign =
+    currentUser?.role === "manager" || currentUser?.role === "admin";
+
+  async function loadWorkspaceDirectory() {
+    if (!canAssign) {
+      setWorkspaceMembers([]);
+      return;
+    }
+    try {
+      const directory = await getWorkspaceDirectory();
+      setWorkspaceMembers(directory.users);
+    } catch {
+      setWorkspaceMembers([]);
+    }
+  }
 
   async function loadTasks() {
     if (!isAuthenticated) return;
@@ -269,10 +292,12 @@ function App() {
         title: title.trim(),
         description: description.trim() || null,
         due_date: dueDate ? new Date(dueDate).toISOString() : null,
+        assignee: assignee || null,
       });
       setTitle("");
       setDescription("");
       setDueDate("");
+      setAssignee("");
       await loadTasks();
       await loadInsights();
       await loadPlayback(playbackPresetDays);
@@ -407,6 +432,7 @@ function App() {
     try {
       const me = await getMe();
       setCurrentUser(me);
+      setProfileDisplayName(me.display_name);
     } catch {
       setAuthToken("");
       setCurrentUser(null);
@@ -426,6 +452,26 @@ function App() {
     setSelectedScenarioId("default");
   }, [isDemoUser]);
 
+  useEffect(() => {
+    if (!currentUser) return;
+    void loadWorkspaceDirectory();
+  }, [currentUser?.id, currentUser?.role]);
+
+  async function handleSaveProfile() {
+    setSavingProfile(true);
+    setError("");
+    try {
+      const updated = await updateProfile({ display_name: profileDisplayName.trim() || "" });
+      setCurrentUser(updated);
+      setProfileDisplayName(updated.display_name);
+      await loadWorkspaceDirectory();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update profile");
+    } finally {
+      setSavingProfile(false);
+    }
+  }
+
   async function handleAuthSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setAuthLoading(true);
@@ -437,6 +483,7 @@ function App() {
           : await register(authEmail.trim(), authPassword);
       setAuthToken(result.access_token);
       setCurrentUser(result.user);
+      setProfileDisplayName(result.user.display_name);
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : "Authentication failed");
     } finally {
@@ -699,10 +746,27 @@ function App() {
               </div>
             </div>
             <p className="muted">Your data is isolated to this account.</p>
+            <p className="muted">
+              Signed in as <strong>{currentUser?.display_name ?? currentUser?.email}</strong>
+              {currentUser?.role ? ` (${currentUser.role})` : ""}
+            </p>
+            <div className="task-form">
+              <label>
+                Display name
+                <input
+                  value={profileDisplayName}
+                  onChange={(e) => setProfileDisplayName(e.target.value)}
+                  placeholder="How teammates see you in assignee lists"
+                />
+              </label>
+              <button type="button" onClick={() => void handleSaveProfile()} disabled={savingProfile}>
+                {savingProfile ? "Saving..." : "Save profile"}
+              </button>
+            </div>
             {isDemoUser ? (
               <>
                 <p className="muted">
-                  Demo mode reset/scenario loading requires backend env: <code>DEMO_MODE=true</code>.
+                  Demo scenarios and persona dashboards are enabled for this account.
                 </p>
                 <div className="task-actions">
                   <select
@@ -875,6 +939,9 @@ function App() {
             title={title}
             description={description}
             dueDate={dueDate}
+            assignee={assignee}
+            showAssignee={canAssign}
+            workspaceMembers={workspaceMembers}
             creating={creating}
             onAiInputChange={setAiInput}
             onAiParse={handleAiParse}
@@ -884,6 +951,7 @@ function App() {
             onTitleChange={setTitle}
             onDescriptionChange={setDescription}
             onDueDateChange={setDueDate}
+            onAssigneeChange={setAssignee}
           />
 
           <ChatPanel onTasksChanged={() => void loadTasks()} />

@@ -102,6 +102,16 @@ def find_assignee_candidates(db, tenant_id: str, hint: str):
     return prefix
 
 
+def serialize_user_profile(user) -> dict:
+    return {
+        "id": user.id,
+        "email": user.email,
+        "role": (user.role or "employee").strip().lower(),
+        "tenant_id": user.tenant_id or "default",
+        "display_name": effective_display_name(user),
+    }
+
+
 def find_tenant_user(db, tenant: str, assignee: str):
     """Resolve a tenant user by email, slack id, or exact display name."""
     from app.models import User
