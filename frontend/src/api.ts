@@ -86,6 +86,42 @@ export type WorkspaceDirectoryResponse = {
   users: WorkspaceDirectoryUser[];
 };
 
+export type AuditListItem = {
+  id: number;
+  request_text: string;
+  tool_name: string | null;
+  arguments: string | null;
+  validation_result: string;
+  execution_result: string;
+  user_id: number;
+  tenant_id: string;
+  slack_event_id: string | null;
+  created_at: string;
+};
+
+export type AuditTrace = {
+  trace_id: string;
+  audit_log_id: number | null;
+  outcome: string;
+  total_duration_ms: number;
+  slack_channel_id: string | null;
+  slack_message_ts: string | null;
+  slack_user_id: string | null;
+  tenant_id: string;
+  spans: Array<Record<string, unknown>>;
+  metrics: Record<string, unknown>;
+  created_at: string;
+};
+
+export type AuditDetail = AuditListItem & {
+  trace: AuditTrace | null;
+};
+
+export type AuditListResponse = {
+  items: AuditListItem[];
+  count: number;
+};
+
 export type AuthResponse = {
   access_token: string;
   token_type: "bearer";
@@ -560,6 +596,14 @@ export async function updateProfile(payload: {
 
 export async function getWorkspaceDirectory(): Promise<WorkspaceDirectoryResponse> {
   return request<WorkspaceDirectoryResponse>("/workspace/directory");
+}
+
+export async function listAuditLogs(limit = 50): Promise<AuditListResponse> {
+  return request<AuditListResponse>(`/audit?limit=${limit}`);
+}
+
+export async function getAuditDetail(auditId: number): Promise<AuditDetail> {
+  return request<AuditDetail>(`/audit/${auditId}`);
 }
 
 export async function resetDemoData(): Promise<{ ok: boolean; seeded_tasks: number }> {

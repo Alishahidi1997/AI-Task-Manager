@@ -150,6 +150,7 @@ All **Epics 1–4** and stretch ops are implemented. Design details: **`docs/DES
 | 4.1 | Workspace display-name directory | **Done** (`User.display_name`, `GET /workspace/directory`, assignee resolution + planner hints) |
 | 4.2 | Structured JSON HTTP request logs | **Done** (`HTTP_LOG_JSON`, one JSON line per request; default in production) |
 | 4.3 | Profile API + workspace assignee picker | **Done** (`PATCH /auth/me`, enriched `/auth/me`, React assignee dropdown) |
+| 4.4 | React AI audit dashboard | **Done** (`AuditPanel`, `GET /audit` list + detail for managers) |
 
 ---
 

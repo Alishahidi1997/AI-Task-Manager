@@ -34,6 +34,7 @@ import {
   updateTaskStatus,
 } from "./api";
 import { AuthPanel } from "./components/AuthPanel";
+import { AuditPanel } from "./components/AuditPanel";
 import { ChatPanel } from "./components/ChatPanel";
 import { TaskComposerPanel } from "./components/TaskComposerPanel";
 import { TaskListPanel } from "./components/TaskListPanel";
@@ -955,6 +956,8 @@ function App() {
           />
 
           <ChatPanel onTasksChanged={() => void loadTasks()} />
+
+          <AuditPanel enabled={canAssign} />
 
           <section className="panel">
             <h2>AI Command Console</h2>

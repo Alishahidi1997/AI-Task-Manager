@@ -26,7 +26,7 @@ function formatChatResponse(body: ChatOrchestrationResult): string {
     const assignee =
       typeof body.result.assignee === "string" ? body.result.assignee : null;
     const assigneeNote = assignee ? `, assignee: ${assignee}` : "";
-    return `Done — ${tool}${taskId != null ? ` (task #${taskId}, ${taskStatus}${assigneeNote})` : ""}.`;
+    return `Done — ${tool}${taskId != null ? ` (task #${taskId}, ${taskStatus}${assigneeNote})` : ""}${body.audit_id != null ? ` [audit #${body.audit_id}]` : ""}.`;
   }
   if (body.status === "clarification_required") {
     return body.question ?? "I need more information to continue.";
